@@ -1,0 +1,200 @@
+---
+title: "UN Consulting Project"
+author: "Karen Cao, Mac Tan, Tana Wuren George Yang"
+date: "10/15/2018"
+output: pdf_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# Load all required dependencies
+library(openxlsx)
+library(tidyverse)
+library(lubridate)
+library(stats)
+```
+
+Subset "Indicator == TFR" from the original dataset. We will focus on Total Fertility Rate (TFR) first, ignoring different fertility rates for different age groups. As suggested by our client, "DataValue" is the outcome and the predictors are "ISO.code"," TimeMid", "DataProcessType", "DataProcess", "DataCatalog ShortName," "RecallLag", "DataTypeGroupName" and "DataTypeRecoded". This dataset has TFR information of 201 countries.  
+
+# Data Pre-Processing
+
+```{r, warning = FALSE}
+# Subset TFR and required predictors from the original dataset
+# tfr_data = read.xlsx("/Users/Ka_rennn/Desktop/School/Statistical Conulting/Data/UNPD_WFD_2017_FERTILITY_EmpiricalData.xlsx", sheet = 3)
+# tfr_data = tfr_data %>% filter(Indicator == "TFR") %>% select(DataValue, ISO.code, Country.or.area, TimeMid, DataProcessType, DataProcess, DataCatalog.ShortName, RecallLag, DataTypeGroupName, DataTypeRecoded) %>% arrange(ISO.code, TimeMid)
+# tfr_data$TimeMid = format(date_decimal(tfr_data$TimeMid), "%Y-%m-%d") # formate time variable
+# write.csv(tfr_data, file = "tfr_data.csv")
+# rm(tfr_data)
+# Load and merge the cleaned data and sub-region data by country
+tfr = read.csv("tfr_data.csv", header = T)
+subregion = read.csv("un_subregion.csv", header = T)
+tfr = merge(x = tfr, y = subregion[ , -1], by = "ISO.code")
+tfr$TimeMid = as.Date.character(format(date_decimal(tfr$TimeMid), "%Y-%m-%d"))
+head(tfr)
+```
+
+# Distributions and Summary Statistics
+
+## Overall
+
+```{r}
+# DataValue
+hist(tfr$DataValue, xlab = "TFR", main = "Histogram of TFR")
+summary(tfr$DataValue) # world-wide speaking, mean TFR is 3.57 and the median is around 3
+```
+
+```{r}
+# DataProcessType: Type of process used to collect or obtain the data values
+barplot(table(tfr$DataProcessType), main = "type of process used to collect the data") # Register, Estimate, Survey and Census are the most popular types of data process
+```
+
+```{r}
+# DataProcess: Specific process used to collect or obtain the data values (e.g., specific international data collection program)
+table(tfr$DataProcess)
+```
+
+```{r}
+# DataCatalog.ShortName: Abbreviated short name for data source
+table(tfr$DataCatalog.ShortName)[1 : 10]
+```
+
+```{r}
+# RecallLag: Length of the recall period (in years) between time of data collection (FieldWorkMiddle) and the mid-reference date for the data value (TimeMid)
+hist(tfr$RecallLag, main = "Distribution of 'RecallLag'", xlab = "RecallLag")
+# hist(tfr[tfr$DataTypeGroupName == "Direct", ]$RecallLag, main = "Distribution of 'RecallLag' for Direct method", xlab = "RecallLag") # direct method has smaller "RecallLag"
+```
+
+```{r}
+# DataTypeGroupName: Type of method used to compute the estimates 
+barplot(table(tfr$DataTypeGroupName), main = "type of method used to compute the estimates") # most estimates were calculated using direct method
+```
+
+```{r}
+# DataTypeRecoded: Type of collected data or estimation process used to derive the data value (i.e., defining whether data are from direct, retrospective or indirect method).
+table(tfr$DataTypeRecoded)[1:10]
+```
+
+## Sub-regions
+
+Look at similar distribution/statistics for developed, developing and least developed countries/areas. 
+
+```{r}
+table(tfr$development)
+```
+
+```{r}
+tfr_dev = tfr[tfr$development == "Developed", ]
+tfr_deving = tfr[tfr$development == "Developing", ]
+tfr_least = tfr[tfr$development == "Least developed", ]
+# TFR
+hist(tfr_dev$DataValue, main = "Histogram of Developed Countries/Areas", xlab = "TFR")
+hist(tfr_deving$DataValue, main = "Histogram of Developing Countries/Areas", xlab = "TFR")
+hist(tfr_least$DataValue, main = "Histogram of Least Developed Countries/Areas", xlab = "TFR")
+summary(tfr_dev$DataValue) 
+summary(tfr_deving$DataValue)
+summary(tfr_least$DataValue)
+# On average, less developed countries/areas have higher TFR
+```
+
+```{r}
+# DataProcessType: Type of process used to collect or obtain the data values
+barplot(table(tfr_dev$DataProcessType), main = "Developed") 
+barplot(table(tfr_deving$DataProcessType), main = "Developing")
+barplot(table(tfr_least$DataProcessType), main = "Least Develped") 
+```
+
+```{r}
+# RecallLag
+par(mfrow = c(2, 2))
+hist(tfr_dev$RecallLag, main = "Developed", xlim = c(-40, 0))
+hist(tfr_deving$RecallLag, main = "Developing", xlim = c(-40, 0))
+hist(tfr_least$RecallLag, main = "Least Developed", xlim = c(-40, 0))
+```
+
+```{r}
+# DataTypeGroupName
+barplot(table(tfr_dev$DataTypeGroupName), main = "Developed")
+barplot(table(tfr_deving$DataTypeGroupName), main = "Developing")
+barplot(table(tfr_least$DataTypeGroupName), main = "Least Developed")
+```
+Generally speaking, the less developed the country/area is, the more likely there's uncertainty within its collected data. 
+
+## Plots
+
+```{r, warning = FALSE}
+# Generate a function to genreate time series plot for each input contry
+tfr_plot = function(country){
+  #ggplot(tfr[which(tfr$Country.or.area == country), ], aes(x = TimeMid, y = DataValue, col = DataCatalog.ShortName)) + geom_point() + geom_line() + scale_x_date(date_labels = "%Y") + geom_smooth() + ggtitle(paste(country))
+  
+  ggplot(tfr[which(tfr$Country.or.area == country), ], aes(x = TimeMid, y = DataValue, col = DataTypeRecoded)) + geom_point() + geom_line() + scale_x_date(date_labels = "%Y") + geom_smooth() + ggtitle(paste(country))
+}
+
+tfr_m <- tfr %>% group_by(year = year(TimeMid), ISO.code, Country.or.area) %>% summarise(DataValue = mean(DataValue)) %>% arrange(ISO.code, year) %>% ungroup()
+
+tfr_m_plot <- function(country) {
+  ggplot(tfr[which(tfr$Country.or.area == country), ], aes(x = year, y = DataValue)) + geom_point() + geom_line() + scale_x_date(date_labels = "%Y") + geom_smooth() + ggtitle(paste(country))
+}
+
+# Developed countries
+tfr_plot("Japan")
+tfr_plot("United States of America")
+# Developing countries
+tfr_plot("China")
+tfr_plot("Brazil")
+# Least developed countries
+tfr_plot("Uganda")
+tfr_plot("Haiti")
+```
+
+
+```{r}
+best_degree <- function(country, max_degree = 10) {
+  
+  require(dplyr)
+  country_data <- tfr_m %>%
+    filter(Country.or.area == country)
+  n <- nrow(country_data)
+  best_model <- lm(DataValue~year, data = country_data)
+  for(i in 2:max_degree) {
+    new_model <- lm(DataValue~poly(year,i), data = country_data)
+    compare_anova <- anova(new_model, best_model)
+    if(compare_anova$`Pr(>F)`[2] < 0.05) {
+      best_model <- new_model
+    } else {
+      break
+    }
+  }
+  year1 <- seq(from = range(country_data)[1], to = range(country_data)[2], by = 1)
+  country.pred <- data.frame(year = year1, predict(best_model, interval = 'confidence'))
+  
+  ggplot() + 
+    geom_point(data = country_data, aes(year, DataValue)) + 
+    geom_line(data = country.pred, aes(year, fit)) + 
+    geom_ribbon(data = country.pred, aes(year, ymin = lwr,ymax = upr), alpha = 0.4)
+}
+
+ggplot(tfr[which(tfr$Country.or.area == "Japan"), ], aes(x = year, y = DataValue)) + geom_point() + geom_line() + scale_x_date(date_labels = "%Y") + geom_smooth() + ggtitle(paste(country))
+
+ggplot() + geom_point(data = japan, aes(year, DataValue)) + geom_line(data = country.pred, aes(year, fit)) + geom_ribbon(data = country.pred, aes(x = year, ymin = lwr,ymax = upr), alpha = 0.4)
+
+```
+
+## Missing data
+
+```{r}
+missing_tbl <- read.csv("/Users/Ka_rennn/Desktop/School/Statistical Consulting/Data/missing_tbl.csv")
+ggplot(missing_tbl, aes(x = n_missing, col = development, fill = development)) +
+  geom_histogram(alpha = 0.5, pos = "identity", binwidth = 4) +
+  labs(title = "Missing data counts by development level", 
+       x = "Number of missing years 1950 - 2016",
+       y = "Countries")
+```
+
+# Challenges
+
+1. Sparse data
+* only a few data points from 1950 to present (~ 70 years)
+* limited data for early years in particular
+
+2. Inconsistency b/t successive or overlapping data sources
+* reliability of different data sources differ, how do we decide which ones are better?
