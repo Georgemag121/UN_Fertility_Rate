@@ -148,7 +148,9 @@ tfr_plot("Haiti")
 
 
 ```{r}
-best_degree <- function(country, max_degree = 10) {
+
+# return best degree, best model summary, and plot
+best_model <- function(country, max_degree = 10) {
   
   require(dplyr)
   country_data <- tfr_m %>%
@@ -160,20 +162,23 @@ best_degree <- function(country, max_degree = 10) {
     compare_anova <- anova(new_model, best_model)
     if(compare_anova$`Pr(>F)`[2] < 0.05) {
       best_model <- new_model
+      best_degree <- i
     } else {
       break
     }
   }
-  year1 <- seq(from = range(country_data)[1], to = range(country_data)[2], by = 1)
+  year1 <- unique(country_data$year)
   country.pred <- data.frame(year = year1, predict(best_model, interval = 'confidence'))
   
-  ggplot() + 
+  p <- ggplot() + 
     geom_point(data = country_data, aes(year, DataValue)) + 
     geom_line(data = country.pred, aes(year, fit)) + 
-    geom_ribbon(data = country.pred, aes(year, ymin = lwr,ymax = upr), alpha = 0.4)
+    geom_ribbon(data = country.pred, aes(year, ymin = lwr, ymax = upr), alpha = 0.4)
+  print(p)
+  return(list(best_degree, summary(best_model)))
 }
 
-ggplot(tfr[which(tfr$Country.or.area == "Japan"), ], aes(x = year, y = DataValue)) + geom_point() + geom_line() + scale_x_date(date_labels = "%Y") + geom_smooth() + ggtitle(paste(country))
+ggplot(tfr[which(tfr$Country.or.area == "Japan"), ], aes(x = year, y = DataValue)) + geom_point() + geom_line() + scale_x_date(date_labels = "%Y") + geom_smooth()
 
 ggplot() + geom_point(data = japan, aes(year, DataValue)) + geom_line(data = country.pred, aes(year, fit)) + geom_ribbon(data = country.pred, aes(x = year, ymin = lwr,ymax = upr), alpha = 0.4)
 
