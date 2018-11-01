@@ -12,6 +12,7 @@ library(openxlsx)
 library(tidyverse)
 library(lubridate)
 library(stats)
+library(data.table)
 ```
 
 Subset "Indicator == TFR" from the original dataset. We will focus on Total Fertility Rate (TFR) first, ignoring different fertility rates for different age groups. As suggested by our client, "DataValue" is the outcome and the predictors are "ISO.code"," TimeMid", "DataProcessType", "DataProcess", "DataCatalog ShortName," "RecallLag", "DataTypeGroupName" and "DataTypeRecoded". This dataset has TFR information of 201 countries.  
@@ -196,11 +197,70 @@ japan_model$degree
 predict(japan_model$model, newdata = data.frame(year_ctr = 1947-1981))
 ```
 
-
+## Create Avg Bias
 ```{r}
-ggplot(tfr[which(tfr$Country.or.area == "Japan"), ], aes(x = year, y = DataValue)) + geom_point() + geom_line() + scale_x_date(date_labels = "%Y") + geom_smooth()
+best_model_predict <- function(country, max_degree = 10) {
+  
+  require(dplyr)
+  country_data <- tfr_m %>%
+    filter(Country.or.area == country)
+  mean_year <- mean(country_data$year)
+  
+  country_data <- country_data %>%
+    mutate(year_ctr = year - mean_year)
+  n <- nrow(country_data)
+  current_formula <- "DataValue~year_ctr"
+  best_model <- lm(formula(current_formula), data = country_data)
+  for(i in 2:max_degree) {
+    new_formula <- paste0(current_formula,"+I(year_ctr^",i,")")
+    new_model <- lm(formula(new_formula), data = country_data)
+    compare_anova <- anova(new_model, best_model)
+    if((compare_anova$`Pr(>F)`[2] < 0.05) & is.na(compare_anova$`Pr(>F)`[2]) == FALSE) {
+      best_model <- new_model
+      best_degree <- i
+    } else {
+      break
+    }
+    current_formula <- new_formula
+  }
+  year1 <- unique(country_data$year)
+  pred <- data.frame(newdata = data.frame(year = year1), predict(best_model))
+  pred$Country.or.area <- rep(country, length(year1))
+  colnames(pred) <- c("year", "predict", "Country.or.area")
+  return(data.frame(pred))
+}
 
-ggplot() + geom_point(data = japan, aes(year, DataValue)) + geom_line(data = country.pred, aes(year, fit)) + geom_ribbon(data = country.pred, aes(x = year, ymin = lwr,ymax = upr), alpha = 0.4)
+joincountry <- function(x, y, by = NULL) {
+  require(dplyr)
+  left_join(y, x, by = by)
+}
+
+pred.table1 <- rbindlist(lapply(as.list(unique(tfr$Country.or.area)), best_model_predict))
+pred.table1$Country.or.area <- as.character(pred.table1$Country.or.area)
+
+
+tfr_pred1 <- tfr %>% mutate(year = year(TimeMid), Country.or.area = as.character(Country.or.area)) %>% left_join(., pred.table, by = c("Country.or.area" = "Country.or.area", "year" = "year")) %>% mutate(res = DataValue - predict) %>% group_by(DataProcessType, region, development) %>% mutate(avg.adj1 = -mean(res)) %>% ungroup() %>% mutate(adjd.tfr = DataValue + avg.adj1)
+
+tfr_pred_plot1 <- function(country) {
+  tfr_pred1 %>% filter(Country.or.area == country) %>% ggplot() + geom_point(aes(x = year, y = DataValue), col = "blue") + geom_smooth(aes(x= year, y = DataValue)) + geom_point(aes(x= year, y = adjd.tfr), col = "red") + geom_smooth(aes(x= year, y = adjd.tfr), col = "red") + ggtitle(paste(country))
+}
+
+```
+
+## Filter with only data after 1950
+```{r}
+# change best_model_predict to include filter(year >= 1950) before running
+
+tfr1950 <- tfr %>% mutate(year = year(TimeMid)) %>% filter(year >= 1950)
+
+pred.table2 <- rbindlist(lapply(as.list(unique(tfr1950$Country.or.area)), best_model_predict))
+pred.table2$Country.or.area <- as.character(pred.table2$Country.or.area)
+
+tfr_pred2 <- tfr1950 %>% mutate(Country.or.area = as.character(Country.or.area)) %>% left_join(., pred.table2, by = c("Country.or.area" = "Country.or.area", "year" = "year")) %>% mutate(res = DataValue - predict) %>% group_by(DataProcessType, region, development) %>% mutate(avg.adj1 = -mean(res)) %>% ungroup() %>% mutate(adjd.tfr = DataValue + avg.adj1)
+
+tfr_pred2_plot <- function(country) {
+  tfr_pred2 %>% filter(Country.or.area == country) %>% ggplot() + geom_point(aes(x = year, y = DataValue), col = "blue") + geom_smooth(aes(x= year, y = DataValue)) + geom_point(aes(x= year, y = adjd.tfr), col = "red") + geom_smooth(aes(x= year, y = adjd.tfr), col = "red") + ggtitle(paste(country))
+}
 
 ```
 
