@@ -150,7 +150,7 @@ tfr_plot("Haiti")
 
 ```{r}
 # return best degree, best model summary, and plot
-best_model <- function(country, max_degree = 10) {
+best_model <- function(country, max_degree = 10, print.plot = TRUE) {
   
   require(dplyr)
   country_data <- tfr_m %>%
@@ -161,15 +161,20 @@ best_model <- function(country, max_degree = 10) {
   n <- nrow(country_data)
   current_formula <- "DataValue~year_ctr"
   best_model <- lm(formula(current_formula), data = country_data)
+  best_degree <- 1
+  p_value <- NA
   for(i in 2:max_degree) {
     new_formula <- paste0(current_formula,"+I(year_ctr^",i,")")
     new_model <- lm(formula(new_formula), data = country_data)
     compare_anova <- anova(new_model, best_model)
+    
+    
     if((compare_anova$`Pr(>F)`[2] < 0.05) & is.na(compare_anova$`Pr(>F)`[2]) == FALSE) {
       best_model <- new_model
       best_degree <- i
+      p_value <- compare_anova$`Pr(>F)`[2]
     } else {
-      break
+      NULL
     }
     current_formula <- new_formula
   }
@@ -179,15 +184,17 @@ best_model <- function(country, max_degree = 10) {
   p <- ggplot() + 
     geom_point(data = country_data, aes(year, DataValue)) + 
     geom_line(data = country.pred, aes(year, fit)) + 
-    geom_ribbon(data = country.pred, aes(year, ymin = lwr, ymax = upr), alpha = 0.4)
+    geom_ribbon(data = country.pred, aes(year, ymin = lwr, ymax = upr), alpha = 0.4) + 
+    ggtitle(paste(country))
   print(p)
   return(list(
     model_deets = list(degree = best_degree,
                        R2 = summary(best_model$adj.r.squared),
                        RMSE = sqrt(sum(residuals(best_model)^2)/length(residuals(best_model)))
     ),
-    model = best_model)
-    )
+    model = best_model, p.value = p_value,
+    plot = p)
+  )
 }
 ```
 
@@ -203,7 +210,8 @@ best_model_predict <- function(country, max_degree = 10) {
   
   require(dplyr)
   country_data <- tfr_m %>%
-    filter(Country.or.area == country)
+    filter(Country.or.area == country#, year >= 1950 
+           )
   mean_year <- mean(country_data$year)
   
   country_data <- country_data %>%
@@ -239,7 +247,7 @@ pred.table1 <- rbindlist(lapply(as.list(unique(tfr$Country.or.area)), best_model
 pred.table1$Country.or.area <- as.character(pred.table1$Country.or.area)
 
 
-tfr_pred1 <- tfr %>% mutate(year = year(TimeMid), Country.or.area = as.character(Country.or.area)) %>% left_join(., pred.table, by = c("Country.or.area" = "Country.or.area", "year" = "year")) %>% mutate(res = DataValue - predict) %>% group_by(DataProcessType, region, development) %>% mutate(avg.adj1 = -mean(res)) %>% ungroup() %>% mutate(adjd.tfr = DataValue + avg.adj1)
+tfr_pred1 <- tfr %>% mutate(year = year(TimeMid), Country.or.area = as.character(Country.or.area)) %>% left_join(., pred.table1, by = c("Country.or.area" = "Country.or.area", "year" = "year")) %>% mutate(res = DataValue - predict) %>% group_by(DataProcessType, region, development) %>% mutate(avg.adj1 = -mean(res)) %>% ungroup() %>% mutate(adjd.tfr = DataValue + avg.adj1)
 
 tfr_pred_plot1 <- function(country) {
   tfr_pred1 %>% filter(Country.or.area == country) %>% ggplot() + geom_point(aes(x = year, y = DataValue), col = "blue") + geom_smooth(aes(x= year, y = DataValue)) + geom_point(aes(x= year, y = adjd.tfr), col = "red") + geom_smooth(aes(x= year, y = adjd.tfr), col = "red") + ggtitle(paste(country))
@@ -256,10 +264,10 @@ tfr1950 <- tfr %>% mutate(year = year(TimeMid)) %>% filter(year >= 1950)
 pred.table2 <- rbindlist(lapply(as.list(unique(tfr1950$Country.or.area)), best_model_predict))
 pred.table2$Country.or.area <- as.character(pred.table2$Country.or.area)
 
-tfr_pred2 <- tfr1950 %>% mutate(Country.or.area = as.character(Country.or.area)) %>% left_join(., pred.table2, by = c("Country.or.area" = "Country.or.area", "year" = "year")) %>% mutate(res = DataValue - predict) %>% group_by(DataProcessType, region, development) %>% mutate(avg.adj1 = -mean(res)) %>% ungroup() %>% mutate(adjd.tfr = DataValue + avg.adj1)
+tfr_pred2 <- tfr1950 %>% mutate(Country.or.area = as.character(Country.or.area)) %>% left_join(., pred.table2, by = c("Country.or.area" = "Country.or.area", "year" = "year")) %>% mutate(res = DataValue - predict) %>% group_by(DataCatalog.ShortName, region, development) %>% mutate(avg.adj1 = -mean(res)) %>% ungroup() %>% mutate(adjd.tfr = DataValue + avg.adj1)
 
 tfr_pred2_plot <- function(country) {
-  tfr_pred2 %>% filter(Country.or.area == country) %>% ggplot() + geom_point(aes(x = year, y = DataValue), col = "blue") + geom_smooth(aes(x= year, y = DataValue)) + geom_point(aes(x= year, y = adjd.tfr), col = "red") + geom_smooth(aes(x= year, y = adjd.tfr), col = "red") + ggtitle(paste(country))
+  tfr_pred2 %>% filter(Country.or.area == country) %>% ggplot() + geom_point(aes(x = year, y = DataValue), col = "blue") + geom_smooth(aes(x= year, y = DataValue), size = 0.2) + geom_point(aes(x= year, y = adjd.tfr), col = "red") + geom_smooth(aes(x= year, y = adjd.tfr), col = "red", size = 0.2) + ggtitle(paste(country))
 }
 
 ```
@@ -283,3 +291,16 @@ ggplot(missing_tbl, aes(x = n_missing, col = development, fill = development)) +
 
 2. Inconsistency b/t successive or overlapping data sources
 * reliability of different data sources differ, how do we decide which ones are better?
+
+```{r}
+plot_list <- vector("list", n_distinct(tfr_m$Country.or.area))
+for(i in 1:n_distinct(tfr_m$Country.or.area)) {
+  countries <- sort(unique(tfr_m$Country.or.area))
+  country <- countries[i]
+  plot_list[[i]] <- best_model(country, print.plot = FALSE)$plot
+  if(i %% 10 == 0) {
+    print(paste("Country:", country))
+  }
+}
+```
+
