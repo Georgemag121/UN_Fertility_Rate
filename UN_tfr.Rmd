@@ -13,6 +13,7 @@ library(tidyverse)
 library(lubridate)
 library(stats)
 library(data.table)
+library(gridExtra)
 ```
 
 Subset "Indicator == TFR" from the original dataset. We will focus on Total Fertility Rate (TFR) first, ignoring different fertility rates for different age groups. As suggested by our client, "DataValue" is the outcome and the predictors are "ISO.code"," TimeMid", "DataProcessType", "DataProcess", "DataCatalog ShortName," "RecallLag", "DataTypeGroupName" and "DataTypeRecoded". This dataset has TFR information of 201 countries.  
@@ -31,6 +32,7 @@ tfr = read.csv("tfr_data.csv", header = T)
 subregion = read.csv("un_subregion.csv", header = T)
 tfr = merge(x = tfr, y = subregion[ , -1], by = "ISO.code")
 tfr$TimeMid = as.Date.character(format(date_decimal(tfr$TimeMid), "%Y-%m-%d"))
+tfr <- tfr %>% mutate(year = year(TimeMid)) %>% filter(year <= 2016)
 head(tfr)
 ```
 
@@ -127,10 +129,10 @@ Generally speaking, the less developed the country/area is, the more likely ther
 tfr_plot = function(country){
   #ggplot(tfr[which(tfr$Country.or.area == country), ], aes(x = TimeMid, y = DataValue, col = DataCatalog.ShortName)) + geom_point() + geom_line() + scale_x_date(date_labels = "%Y") + geom_smooth() + ggtitle(paste(country))
   
-  ggplot(tfr[which(tfr$Country.or.area == country), ], aes(x = TimeMid, y = DataValue, col = DataTypeRecoded)) + geom_point() + geom_line() + scale_x_date(date_labels = "%Y") + geom_smooth() + ggtitle(paste(country))
+  ggplot(tfr[which(tfr$Country.or.area == country), ], aes(x = TimeMid, y = DataValue, col = DataTypeRecoded)) + geom_point(aes(size = 6.5 - sqrt(-RecallLag))) + geom_line() + scale_x_date(date_labels = "%Y") + geom_smooth() + ggtitle(paste(country)) + scale_y_continuous(limits = c(0, 11.5))
 }
 
-tfr_m <- tfr %>% group_by(year = year(TimeMid), ISO.code, Country.or.area) %>% summarise(DataValue = mean(DataValue)) %>% arrange(ISO.code, year) %>% ungroup()
+tfr_m <- tfr %>% group_by(year, ISO.code, Country.or.area) %>% summarise(DataValue = mean(DataValue)) %>% arrange(ISO.code, year) %>% ungroup()
 
 tfr_m_plot <- function(country) {
   ggplot(tfr[which(tfr$Country.or.area == country), ], aes(x = year, y = DataValue)) + geom_point() + geom_line() + scale_x_date(date_labels = "%Y") + geom_smooth() + ggtitle(paste(country))
@@ -185,6 +187,7 @@ best_model <- function(country, max_degree = 10, print.plot = TRUE) {
     geom_point(data = country_data, aes(year, DataValue)) + 
     geom_line(data = country.pred, aes(year, fit)) + 
     geom_ribbon(data = country.pred, aes(year, ymin = lwr, ymax = upr), alpha = 0.4) + 
+    scale_y_continuous(limits = c(0, 11.5)) + 
     ggtitle(paste(country))
   print(p)
   return(list(
@@ -259,7 +262,7 @@ tfr_pred_plot1 <- function(country) {
 ```{r}
 # change best_model_predict to include filter(year >= 1950) before running
 
-tfr1950 <- tfr %>% mutate(year = year(TimeMid)) %>% filter(year >= 1950)
+tfr1950 <- tfr %>% filter(year >= 1950)
 
 pred.table2 <- rbindlist(lapply(as.list(unique(tfr1950$Country.or.area)), best_model_predict))
 pred.table2$Country.or.area <- as.character(pred.table2$Country.or.area)
@@ -275,7 +278,7 @@ tfr_pred2_plot <- function(country) {
 ## Missing data
 
 ```{r}
-missing_tbl <- read.csv("/Users/Ka_rennn/Desktop/School/Statistical Consulting/Data/missing_tbl.csv")
+#missing_tbl <- read.csv("/Users/Ka_rennn/Desktop/School/Statistical Consulting/Data/missing_tbl.csv")
 ggplot(missing_tbl, aes(x = n_missing, col = development, fill = development)) +
   geom_histogram(alpha = 0.5, pos = "identity", binwidth = 4) +
   labs(title = "Missing data counts by development level", 
@@ -303,4 +306,16 @@ for(i in 1:n_distinct(tfr_m$Country.or.area)) {
   }
 }
 ```
+
+
+```{r}
+ggsave("multiplots.pdf", marrangeGrob(grobs = plot_list, nrow=3, ncol=2))
+```
+
+```{r}
+countryAttr <- tfr1950 %>% group_by(Country.or.area) %>% summarise(n_distinct(year)) %>% as.data.frame()
+tfr_pred2 %>% filtergroup_by(Country.or.area, year)
+```
+
+
 
