@@ -152,16 +152,15 @@ tfr_plot("Haiti")
 
 ```{r}
 # return best degree, best model summary, and plot
-best_model <- function(country, max_degree = 10, print.plot = TRUE) {
-  
+best_model <- function(country, df = tfr_m, tfr_var = "DataValue", max_degree = 10, print.plot = TRUE) {
   require(dplyr)
-  country_data <- tfr_m %>%
-    filter(Country.or.area == country)
+  country_data <- df %>%
+    filter(Country.or.area == country, year >= 1950, year <= 2016)
   mean_year <- mean(country_data$year)
   country_data <- country_data %>%
     mutate(year_ctr = year - mean_year)
   n <- nrow(country_data)
-  current_formula <- "DataValue~year_ctr"
+  current_formula <- paste0(tfr_var,"~year_ctr")
   best_model <- lm(formula(current_formula), data = country_data)
   best_degree <- 1
   p_value <- NA
@@ -175,28 +174,29 @@ best_model <- function(country, max_degree = 10, print.plot = TRUE) {
       best_model <- new_model
       best_degree <- i
       p_value <- compare_anova$`Pr(>F)`[2]
-    } else {
-      NULL
     }
     current_formula <- new_formula
   }
   year1 <- unique(country_data$year)
-  country.pred <- data.frame(year = year1, predict(best_model, interval = 'confidence'))
-  
-  p <- ggplot() + 
-    geom_point(data = country_data, aes(year, DataValue)) + 
-    geom_line(data = country.pred, aes(year, fit)) + 
-    geom_ribbon(data = country.pred, aes(year, ymin = lwr, ymax = upr), alpha = 0.4) + 
-    scale_y_continuous(limits = c(0, 11.5)) + 
-    ggtitle(paste(country))
-  print(p)
+  if(print.plot) {
+    country.pred <- data.frame(year = year1, predict(best_model, interval = 'confidence'))
+    
+    p <- ggplot() + 
+      geom_point(data = country_data, aes(year, DataValue)) + 
+      geom_line(data = country.pred, aes(year, fit)) + 
+      geom_ribbon(data = country.pred, aes(year, ymin = lwr, ymax = upr), alpha = 0.4) + 
+      scale_y_continuous(limits = c(0, 11.5)) + 
+      ggtitle(paste(country)) +
+      lims(x = c(1950,2016))
+    print(p)
+  }
   return(list(
     model_deets = list(degree = best_degree,
                        R2 = summary(best_model$adj.r.squared),
                        RMSE = sqrt(sum(residuals(best_model)^2)/length(residuals(best_model)))
     ),
     model = best_model, p.value = p_value,
-    plot = p)
+    plot = ifelse(print.plot, p, NA))
   )
 }
 ```
@@ -213,7 +213,7 @@ best_model_predict <- function(country, max_degree = 10) {
   
   require(dplyr)
   country_data <- tfr_m %>%
-    filter(Country.or.area == country#, year >= 1950 
+    filter(Country.or.area == country, year >= 1950, year <= 2016 
            )
   mean_year <- mean(country_data$year)
   
@@ -277,14 +277,6 @@ tfr_pred2_plot <- function(country) {
 
 ## Missing data
 
-```{r}
-#missing_tbl <- read.csv("/Users/Ka_rennn/Desktop/School/Statistical Consulting/Data/missing_tbl.csv")
-ggplot(missing_tbl, aes(x = n_missing, col = development, fill = development)) +
-  geom_histogram(alpha = 0.5, pos = "identity", binwidth = 4) +
-  labs(title = "Missing data counts by development level", 
-       x = "Number of missing years 1950 - 2016",
-       y = "Countries")
-```
 
 # Challenges
 
@@ -313,9 +305,22 @@ ggsave("multiplots.pdf", marrangeGrob(grobs = plot_list, nrow=3, ncol=2))
 ```
 
 ```{r}
-countryAttr <- tfr1950 %>% group_by(Country.or.area) %>% summarise(n_distinct(year)) %>% as.data.frame()
-tfr_pred2 %>% filtergroup_by(Country.or.area, year)
+countryAttr <- tfr1950 %>% 
+  group_by(Country.or.area) %>% 
+  mutate(n_years = n_distinct(year))
+  
 ```
 
 
+DHS
+MICS
+RHS
+WFS
 
+Birth histories (# of children) > recent births (0/1)
+
+"UN computed"? Direct vs. otherwise
+
+DataTypeRecoded, grouped somehow
+
+DataProcessType -> DataTypeGroup (direct vs. indirect) -> 
