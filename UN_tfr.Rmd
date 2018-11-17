@@ -153,34 +153,49 @@ tfr_plot("Haiti")
 ```{r}
 # return best degree, best model summary, and plot
 best_model <- function(country, df = tfr_m, tfr_var = "DataValue", max_degree = 10, print.plot = TRUE) {
+  ## Load dplyr (required)
   require(dplyr)
+  
+  ## Create country data frame
   country_data <- df %>%
     filter(Country.or.area == country, year >= 1950, year <= 2016)
   mean_year <- mean(country_data$year)
   country_data <- country_data %>%
     mutate(year_ctr = year - mean_year)
+  
+  ## Initialize values for loop
   n <- nrow(country_data)
   current_formula <- paste0(tfr_var,"~year_ctr")
   best_model <- lm(formula(current_formula), data = country_data)
   best_degree <- 1
   p_value <- NA
+  
+  ## Iteratively increase degree of polynomial and test if last degree is significant
   for(i in 2:max_degree) {
+    ## Stitch new term onto polynomial
     new_formula <- paste0(current_formula,"+I(year_ctr^",i,")")
     new_model <- lm(formula(new_formula), data = country_data)
     compare_anova <- anova(new_model, best_model)
     
-    
+    ## Is it significant? 
     if((compare_anova$`Pr(>F)`[2] < 0.05) & is.na(compare_anova$`Pr(>F)`[2]) == FALSE) {
       best_model <- new_model
-      best_degree <- i
+      best_degree <- i # If so, save the degree as the best one
       p_value <- compare_anova$`Pr(>F)`[2]
     }
+    ## Try the next polynomial degree
     current_formula <- new_formula
   }
-  year1 <- unique(country_data$year)
+  
+  year1 <- data.frame(year = 1950:2016, year_ctr = 1950:2016 - mean_year)
+  predictions <- predict(best_model, newdata = year1, interval = "confidence")
+  country.pred <- tibble(year = 1950:2016) %>%
+    mutate(fit = predictions[,1],
+           lwr = predictions[,2],
+           upr = predictions[,3])
+  
+  ## Print plot if specified
   if(print.plot) {
-    country.pred <- data.frame(year = year1, predict(best_model, interval = 'confidence'))
-    
     p <- ggplot() + 
       geom_point(data = country_data, aes(year, DataValue)) + 
       geom_line(data = country.pred, aes(year, fit)) + 
@@ -190,20 +205,22 @@ best_model <- function(country, df = tfr_m, tfr_var = "DataValue", max_degree = 
       lims(x = c(1950,2016))
     print(p)
   }
-  return(list(
-    model_deets = list(degree = best_degree,
-                       R2 = summary(best_model$adj.r.squared),
-                       RMSE = sqrt(sum(residuals(best_model)^2)/length(residuals(best_model)))
-    ),
-    model = best_model, p.value = p_value,
-    plot = ifelse(print.plot, p, NA))
-  )
+  
+  ## Create the object to be returned
+  return_object <- list(model = best_model)
+  return_object$data <- country_data
+  return_object$details <- list(degree = best_degree, 
+                                      R2 = summary(best_model$adj.r.squared),
+                                      RMSE = sqrt(sum(residuals(best_model)^2)/length(residuals(best_model))))
+  return_object$predictions <- country.pred
+  
+  return(return_object)
 }
 ```
 
 ```{r}
-japan_model <- best_model("Japan")
-japan_model$degree
+japan_model <- best_model("China")
+japan_model
 predict(japan_model$model, newdata = data.frame(year_ctr = 1947-1981))
 ```
 
