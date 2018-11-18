@@ -1,0 +1,119 @@
+---
+title: "PolyBaselineModel"
+author: "Karen Cao"
+date: "11/15/2018"
+output: pdf_document
+---
+
+# Polynomial Baseline Model
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(openxlsx)
+library(tidyverse)
+library(lubridate)
+library(stats)
+library(data.table)
+library(dplyr)
+```
+
+## Data Pre-Processiong
+
+* merge tfr data with subregion data
+* calculate mean tfr value for each year, ignore reliability of different sources for now
+* limit the data only from 1950 to 2016
+
+```{r, include = FALSE}
+tfr = read.csv("tfr_data.csv", header = T)
+subregion = read.csv("un_subregion.csv", header = T)
+tfr = merge(x = tfr, y = subregion[ , -1], by = "ISO.code")
+tfr$TimeMid = as.Date.character(format(date_decimal(tfr$TimeMid), "%Y-%m-%d"))
+tfr_m = tfr %>% group_by(year = year(TimeMid), ISO.code, Country.or.area) %>% summarise(DataValue = mean(DataValue)) %>% arrange(ISO.code, year) %>% ungroup() %>% filter(year >= 1950, year <= 2016)
+```
+
+## Polynomial Model
+
+* time trend of tfr over year
+* limit to max degree of 9
+* center year to avoid multicollinearity
+* add higher-ordered term till variance explained is no longer significant, compare with anova
+* use significant level of 0.05
+
+```{r, include = FALSE}
+best_model <- function(country, max_degree = 9, print.plot = TRUE) {
+  country_data <- tfr_m %>%
+    filter(Country.or.area == country)
+  mean_year <- mean(country_data$year)
+  country_data <- country_data %>%
+    mutate(year_ctr = year - mean_year)
+  n <- nrow(country_data)
+  current_formula <- "DataValue~year_ctr"
+  best_model <- lm(formula(current_formula), data = country_data)
+  best_degree <- 1
+  p_value <- NA
+  
+  for(i in 2:max_degree) {
+    new_formula <- paste0(current_formula,"+I(year_ctr^",i,")")
+    new_model <- lm(formula(new_formula), data = country_data)
+    compare_anova <- anova(new_model, best_model)
+    if((compare_anova$`Pr(>F)`[2] < 0.05) & is.na(compare_anova$`Pr(>F)`[2]) == FALSE) {
+      best_model <- new_model
+      best_degree <- i
+      p_value <- compare_anova$`Pr(>F)`[2]
+    } else {
+      NULL
+    }
+    current_formula <- new_formula
+  }
+  
+  year1 <- unique(country_data$year)
+  country.pred <- data.frame(year = year1, predict(best_model, interval = 'confidence'))
+  
+  p <- ggplot() + 
+    geom_point(data = country_data, aes(year, DataValue)) + 
+    geom_line(data = country.pred, aes(year, fit, color = "red")) + 
+    geom_ribbon(data = country.pred, aes(year, ymin = lwr, ymax = upr), alpha = 0.4) + 
+    ggtitle(paste(country, ", degree = ", best_degree)) + 
+    theme(legend.position="none") + 
+    ylim(0, 12)
+  
+  return(list(
+    model_deets = list(degree = best_degree,
+                       R2 = summary(best_model$adj.r.squared),
+                       RMSE = sqrt(sum(residuals(best_model)^2)/length(residuals(best_model)))
+    ),
+    model = best_model, p.value = p_value,
+    plot = p)
+  )
+}
+```
+
+```{r, include = FALSE}
+plot_list <- vector("list", n_distinct(tfr_m$Country.or.area))
+plot_degree <- rep(NA, n_distinct(tfr_m$Country.or.area))
+
+for(i in 1:n_distinct(tfr_m$Country.or.area)) {
+  countries <- sort(unique(tfr_m$Country.or.area))
+  country <- countries[i]
+  plot_list[[i]] <- best_model(country, print.plot = FALSE)$plot
+  plot_degree[i] <- best_model(country, print.plot = FALSE)$model_deets$degree # create degree of the polynomial model for each country
+  if(i %% 10 == 0) {
+    print(paste("Country:", country))
+  }
+}
+```
+
+```{r}
+# order the plots by degrees, from the highest to the lowest
+polyplot = data.frame(index = 1:201, country.or.area = unique(tfr_m$Country.or.area), degree = plot_degree) %>% arrange(desc(degree))
+plot_list_ordered <- vector("list", n_distinct(tfr_m$Country.or.area))
+
+for(i in 1:201){
+  plot_list_ordered[[i]] = plot_list[[polyplot$index[i]]]
+}
+```
+
+```{r, warning=FALSE}
+ggsave("BaselineModelPlot.pdf", marrangeGrob(grobs = plot_list_ordered, nrow = 3, ncol = 2))
+```
+
