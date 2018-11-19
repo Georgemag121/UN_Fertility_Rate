@@ -19,9 +19,9 @@ library(class)
 library(cluster)
 ```
 
--- Cluster countries into 3 groups based on features on recall lag, TFR, and sources of TFR estimated for each country.
+-- Clustering countries into 3 groups based on features on recall lag, TFR, and sources of TFR estimated for each country.
 
--- The cluster can be used to 
+-- The clustering in this file can be used to 
 1) for a given country with little data points, find similiar countries to this given country and borrow strength from these similiar countries in order to extrapolate estimates for the country with little data points 
 2) since the features are mostly based on different sources of TFR estimates, the clustering can help find countries that are similiar in terms of sources estimates.
 
