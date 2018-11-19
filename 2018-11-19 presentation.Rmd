@@ -86,10 +86,9 @@ zambia_model <- best_model("Zambia")
 ## Estimating bias of each data process type
 
 ```{r}
-a = exp(-0.9)
 # Back to 8324
 dup1 <- tfr1950 %>% 
-  mutate(recal = exp(RecallLag*a), 
+  mutate(recal = exp(RecallLag), 
          dhs = (DataProcess == "DHS-NS" | DataProcess == "DHS" | DataProcess == "DHS/MICS" | DataProcess == "DHS/PAPFAM"), 
          direct = (DataTypeGroupName == "Direct" | DataTypeGroupName == "UN computed")) %>% 
   group_by(Country.or.area, year) %>% 
@@ -101,7 +100,7 @@ dup1 <- tfr1950 %>%
 
 # 4930 with no dups group 1 and 2
 group1 <- tfr1950 %>% 
-  mutate(recal = exp(RecallLag*a), 
+  mutate(recal = exp(RecallLag), 
          dhs = (DataProcess == "DHS-NS" | DataProcess == "DHS" | DataProcess == "DHS/MICS" | DataProcess == "DHS/PAPFAM"), 
          direct = (DataTypeGroupName == "Direct" | DataTypeGroupName == "UN computed")) %>% 
   group_by(Country.or.area, year) %>% 
@@ -125,7 +124,7 @@ group4 <- dup1 %>%
   filter(tot_dir == 0) %>% 
   group_by(Country.or.area, year) %>% 
   mutate(tfr_new = weighted.mean(DataValue, w = exp(RecallLag))) %>% 
-  ungroup() %>%  
+  ungroup() %>% 
   mutate(group.num = 4) %>% 
   distinct(ISO.code, Country.or.area, year, tfr_new, group.num) 
 
@@ -149,15 +148,20 @@ group6 <- dup1 %>%
 tfr_adjusted <- rbind(group1, group3, group4, group5, group6)
 tfr_adjusted <- tfr_adjusted %>% 
   arrange(Country.or.area, year) %>% 
-  mutate(indirect = (group.num == 1 | group.num == 4))
+  mutate(indirect = (group.num == 1 | group.num == 4)) %>%
+  merge(tfr_m, by = c("year", "ISO.code", "Country.or.area"), all.x = TRUE)
 
-tfr_adjusted %>% 
-  filter(Country.or.area == "Zambia") %>% 
-  ggplot(aes(x = year, y = tfr_new)) + 
-  geom_point(aes(col = indirect)) + 
-  geom_line() + 
-  lims(x = c(1950,2016)) + 
-  scale_y_continuous(limits = c(0, 11.5))
+afghan_bias1 <- tfr_adjusted %>% 
+  filter(Country.or.area == "Afghanistan") %>% 
+  ggplot(aes(x = year)) + 
+  geom_point(aes(y = DataValue), col = "red", alpha = 0.5) + 
+  geom_jitter(aes(y = tfr_new), col = "blue", alpha = 0.5, width = 0, height = 0.1) + 
+  geom_smooth(aes(y = DataValue), col = "red") + 
+  geom_smooth(aes(y = tfr_new), col = "blue") +
+  labs(title = "Afghanistan bias-adjusted total fertility rate (by data process)",
+       subtitle = "Red = raw, blue = adjusted",
+       x = "Year", y = "Total fertility rate")
+
 ```
 
 ## Iterative non-parametric estimation of bias by data process
@@ -208,21 +212,27 @@ rwanda1950 %>%
   summarise(mean = mean(tfr_adj - DataValue) %>% round(2), 
             sd = sd(tfr_adj - DataValue) %>% round(2))
 
-afghan1950 %>% select(year, DataValue, tfr_adj, DataProcess) %>% 
+afghan_bias2 <- afghan1950 %>% select(year, DataValue, tfr_adj, DataProcess) %>% 
   ggplot(aes(x = year)) + 
   geom_point(aes(y = DataValue), col = "red", alpha = 0.5) + 
   geom_point(aes(y = tfr_adj), col = "blue", alpha = 0.5) + 
   geom_smooth(aes(y = DataValue), col = "red") + 
   geom_smooth(aes(y = tfr_adj), col = "blue") +
-  labs(title = "Afghanistan bias-adjusted total fertility rate",
+  labs(title = "Afghanistan bias-adjusted total fertility rate (by polynomial residuals)",
        subtitle = "Red = raw, blue = adjusted",
        x = "Year", y = "Total fertility rate")
 ```
 
+```{r}
+library(gridExtra)
+grid.arrange(afghan_bias1, afghan_bias2, ncol = 2)
+```
+
+
 ## Building our own clusters
 
 ```{r}
-read.csv("Processed data/all_covariates_scaled.csv", stringsAsFactors = FALSE)
+all_covariates.scaled <- read.csv("Processed data/all_covariates_scaled.csv", stringsAsFactors = FALSE)
 pca_post2000 <- prcomp(~abortion_legality+outdoor_pollution+coal_pollution_pc+contraception_use+corn_grams+diabetes_prev+
                          fourwheelers_pc+haqi+health_access+majority_muslim+pct_under_150_per_sqkm+pct_1000_per_sqkm+redmeat_grams+
                          rice_grams+war_mortality_10yr+water_prop+pct_under30+pct_over_65+crop_prod+cropland+electricity+
