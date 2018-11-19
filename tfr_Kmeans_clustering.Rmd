@@ -1,0 +1,97 @@
+---
+title: "TFR Kmeans Clustering"
+author: "Tana Wuren"
+date: "11/19/2018"
+output: pdf_document
+---
+
+```{r message=FALSE, warning=FALSE, include=FALSE, paged.print=FALSE}
+library("knitr")
+library("ggplot2")
+library("tidyverse")
+library(openxlsx)
+library(tidyverse)
+library(lubridate)
+library(stats)
+library(data.table)
+library(gridExtra)
+library(class)
+library(cluster)
+```
+
+## read in data and merge data
+
+```{r}
+tfr <- read_csv("tfr_data.csv")
+subregion = read_csv("un_subregion.csv")
+tfr <- merge(x = tfr, y = subregion[ , -1], by = "ISO.code")
+tfr$TimeMid <- as.Date.character(format(date_decimal(tfr$TimeMid), "%Y-%m-%d"))
+tfr <- tfr %>% mutate(year = year(TimeMid)) %>% filter(year <= 2016)
+# head(tfr)
+```
+
+## clean up dataset
+
+```{r echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+df <- tfr %>% select(DataValue, Country.or.area, DataProcessType, RecallLag, DataTypeGroupName,  year, development)
+dim(df)
+
+#head(df)
+#unique(tfr$development)
+```
+
+## feature extractions (from 'tfr' data; no covariates used)
+
+```{r}
+# feature extraction
+df_features <- df %>% 
+  filter(year >= 2000, year <= 2016) %>% 
+  group_by(Country.or.area) %>% 
+  summarize(total_pt = sum(n()), 
+            average_RL = mean(abs(RecallLag)), 
+            average_TFR = mean(DataValue), 
+            num_Census = mean(DataProcessType == "Census"), 
+            num_Survey = mean(DataProcessType == "Survey"), 
+            num_Estimate = mean(DataProcessType == "Estimate"), 
+            num_Register = mean(DataProcessType == "Register"), 
+            num_SRS = mean(DataProcessType == "SRS"), 
+            num_Panel = mean(DataProcessType == "Panel"), 
+            num_PES = mean(DataProcessType == "PES"), 
+            num_Indirect = mean(DataTypeGroupName == "Indirect"), 
+            num_Direct = mean(DataTypeGroupName == "Direct"), 
+            num_UN = mean(DataTypeGroupName == "UN computed"), 
+            num_Unknown = mean(DataTypeGroupName == "Unknown"), 
+            num_Undefined = mean(DataTypeGroupName == "Undefined"))
+
+```
+
+## join dataset with features
+
+```{r}
+# joins
+df_tree <- df %>% 
+  select(-DataValue, -DataProcessType, -RecallLag, -DataTypeGroupName, -year) %>% 
+  group_by(Country.or.area) 
+df_tree <- unique( df_tree[,1:2] )
+df_tree <- left_join(x = df_features, y = df_tree, by = "Country.or.area")
+```
+
+## Kmeans clustering
+
+```{r}
+k = 6
+tree_cluster <- kmeans(df_tree[, 2:16], k, nstart = 2)
+#tree_cluster
+```
+
+## visualize clustering
+
+```{r}
+tree_cluster$cluster <- as.factor(tree_cluster$cluster)
+ggplot(df_tree, aes(total_pt, average_TFR, color = tree_cluster$cluster)) + 
+  geom_text(aes(label = Country.or.area), size = 3) +
+  labs(title = paste0("TFR vs. sample size, ",k,"-means clustering"), 
+       x = "Number of TFR measurements",
+       y = "Average TFR")
+```
+
