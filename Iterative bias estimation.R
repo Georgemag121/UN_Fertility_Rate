@@ -43,5 +43,3 @@ for(i in 1:100) {
 brazil1950 %>%
   group_by(DataProcessType) %>%
   summarise(mean = mean(tfr_adj - DataValue), sd = sd(tfr_adj - DataValue))
-
-## 

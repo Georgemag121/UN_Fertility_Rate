@@ -110,6 +110,8 @@ all_covariates.scaled <- all_covariates %>%
   na.omit() %>%
   ungroup()
 
+write.csv(all_covariates.scaled, file = "Processed data/all_covariates_scaled.csv", row.names = FALSE)
+
 pca_post2000 <- prcomp(~abortion_legality+outdoor_pollution+avg_slope+cigarettes+coal_pollution_pc+contraception_use+corn_grams+
                          diabetes_prev+fourwheelers_pc+haqi+health_access+majority_muslim+pct_under_150_per_sqkm+pct_1000_per_sqkm+
                          redmeat_grams+rice_grams+war_mortality_10yr+water_prop+pct_under30+pct_over_65+crop_prod+cropland+electricity+

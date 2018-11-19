@@ -1,0 +1,262 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(tidyverse)
+```
+
+## Finding a best-degree polynomial model
+
+```{r}
+# return best degree, best model summary, and plot
+best_model <- function(country, df = tfr_m, tfr_var = "DataValue", max_degree = 10, print.plot = TRUE) {
+  ## Load dplyr (required)
+  require(dplyr)
+  
+  ## Create country data frame
+  country_data <- df %>%
+    filter(Country.or.area == country, year >= 1950, year <= 2016)
+  mean_year <- mean(country_data$year)
+  country_data <- country_data %>%
+    mutate(year_ctr = year - mean_year)
+  
+  ## Initialize values for loop
+  n <- nrow(country_data)
+  current_formula <- paste0(tfr_var,"~year_ctr")
+  best_model <- lm(formula(current_formula), data = country_data)
+  best_degree <- 1
+  p_value <- NA
+  
+  ## Iteratively increase degree of polynomial and test if last degree is significant
+  for(i in 2:max_degree) {
+    ## Stitch new term onto polynomial
+    new_formula <- paste0(current_formula,"+I(year_ctr^",i,")")
+    new_model <- lm(formula(new_formula), data = country_data)
+    compare_anova <- anova(new_model, best_model)
+    
+    ## Is it significant? 
+    if((compare_anova$`Pr(>F)`[2] < 0.05) & is.na(compare_anova$`Pr(>F)`[2]) == FALSE) {
+      best_model <- new_model
+      best_degree <- i # If so, save the degree as the best one
+      p_value <- compare_anova$`Pr(>F)`[2]
+    }
+    ## Try the next polynomial degree
+    current_formula <- new_formula
+  }
+  
+  year1 <- data.frame(year = 1950:2016, year_ctr = 1950:2016 - mean_year)
+  predictions <- predict(best_model, newdata = year1, interval = "confidence")
+  country.pred <- tibble(year = 1950:2016) %>%
+    mutate(fit = predictions[,1],
+           lwr = predictions[,2],
+           upr = predictions[,3])
+  
+  ## Print plot if specified
+  if(print.plot) {
+    p <- ggplot() + 
+      geom_point(data = country_data, aes(year, DataValue)) + 
+      geom_line(data = country.pred, aes(year, fit)) + 
+      geom_ribbon(data = country.pred, aes(year, ymin = lwr, ymax = upr), alpha = 0.4) + 
+      scale_y_continuous(limits = c(0, 11.5)) + 
+      ggtitle(paste(country)) +
+      lims(x = c(1950,2016))
+    print(p)
+  }
+  
+  ## Create the object to be returned
+  return_object <- list(model = best_model)
+  return_object$data <- country_data
+  return_object$details <- list(degree = best_degree, 
+                                R2 = summary(best_model$adj.r.squared),
+                                RMSE = sqrt(sum(residuals(best_model)^2)/length(residuals(best_model))))
+  return_object$predictions <- country.pred
+  
+  return(return_object)
+}
+```
+
+```{r}
+us_model <- best_model("United States of America")
+brazil_model <- best_model("Brazil")
+zambia_model <- best_model("Zambia")
+```
+
+## Estimating bias of each data process type
+
+```{r}
+a = exp(-0.9)
+# Back to 8324
+dup1 <- tfr1950 %>% 
+  mutate(recal = exp(RecallLag*a), 
+         dhs = (DataProcess == "DHS-NS" | DataProcess == "DHS" | DataProcess == "DHS/MICS" | DataProcess == "DHS/PAPFAM"), 
+         direct = (DataTypeGroupName == "Direct" | DataTypeGroupName == "UN computed")) %>% 
+  group_by(Country.or.area, year) %>% 
+  mutate(dup = n(), 
+         tot_dir = sum(direct), 
+         tot_dhs = sum(dhs)) %>% 
+  ungroup() %>% 
+  filter(dup > 1)
+
+# 4930 with no dups group 1 and 2
+group1 <- tfr1950 %>% 
+  mutate(recal = exp(RecallLag*a), 
+         dhs = (DataProcess == "DHS-NS" | DataProcess == "DHS" | DataProcess == "DHS/MICS" | DataProcess == "DHS/PAPFAM"), 
+         direct = (DataTypeGroupName == "Direct" | DataTypeGroupName == "UN computed")) %>% 
+  group_by(Country.or.area, year) %>% 
+  mutate(dup = n(), 
+         tot_dir = sum(direct)) %>% 
+  ungroup() %>% 
+  filter(dup == 1) %>% 
+  mutate(tfr_new = DataValue) %>% 
+  mutate(group.num = direct + 1) %>% 
+  distinct(ISO.code, Country.or.area, year, tfr_new, group.num) 
+
+# 516 dups with only one direct
+group3 <- dup1 %>% 
+  filter(tot_dir == 1, direct == TRUE) %>% 
+  mutate(tfr_new = DataValue) %>% 
+  mutate(group.num = 3) %>% 
+  distinct(ISO.code, Country.or.area, year, tfr_new, group.num) 
+
+# 781 dups with no direct, weighted avg of indirect
+group4 <- dup1 %>% 
+  filter(tot_dir == 0) %>% 
+  group_by(Country.or.area, year) %>% 
+  mutate(tfr_new = weighted.mean(DataValue, w = exp(RecallLag))) %>% 
+  ungroup() %>%  
+  mutate(group.num = 4) %>% 
+  distinct(ISO.code, Country.or.area, year, tfr_new, group.num) 
+
+# 799 dups with multiple direct and contain dhs sources
+group5 <- dup1 %>% 
+  filter(tot_dir >= 2,  tot_dhs >= 1, direct == TRUE | dhs == TRUE) %>% 
+  group_by(Country.or.area, year) %>% mutate(tfr_new = weighted.mean(DataValue, w = exp(RecallLag))) %>% 
+  ungroup() %>% 
+  mutate(group.num = 5) %>% 
+  distinct(ISO.code, Country.or.area, year, tfr_new, group.num) 
+
+# 5548 dups with multiple direct and no dhs sources
+group6 <- dup1 %>% 
+  filter(tot_dir >= 2, direct == TRUE, tot_dhs == 0) %>% 
+  group_by(Country.or.area, year) %>% 
+  mutate(tfr_new = weighted.mean(DataValue, w = exp(RecallLag))) %>% 
+  ungroup() %>% mutate(group.num = 6) %>% 
+  distinct(ISO.code, Country.or.area, year, tfr_new, group.num) 
+
+# Combine 8322, 
+tfr_adjusted <- rbind(group1, group3, group4, group5, group6)
+tfr_adjusted <- tfr_adjusted %>% 
+  arrange(Country.or.area, year) %>% 
+  mutate(indirect = (group.num == 1 | group.num == 4))
+
+tfr_adjusted %>% 
+  filter(Country.or.area == "Zambia") %>% 
+  ggplot(aes(x = year, y = DataValue)) + 
+  geom_point(aes(col = indirect)) + 
+  geom_line() + 
+  lims(x = c(1950,2016)) + 
+  scale_y_continuous(limits = c(0, 11.5))
+```
+
+## Iterative non-parametric estimation of bias by data process
+
+```{r}
+tfr1950_pred <- tfr1950 %>%
+  as.tbl() %>%
+  # Create bias variable, adjusted TFR
+  mutate(residual = 0, tfr_adj = DataValue, tfr_adj_new = tfr_adj)
+
+## Test out on Afghanistan
+afghan1950 <- tfr1950_pred %>%
+  filter(Country.or.area == "Afghanistan")
+
+for(i in 1:50) {
+  afghan_model <- best_model("Afghanistan", tfr_var = "tfr_adj", df = afghan1950, print.plot = FALSE)
+  afghan1950 <- afghan1950 %>%
+    mutate(year_ctr = year - mean(year)) %>%
+    mutate(predicted = predict(afghan_model$model, newdata = .)) %>%
+    group_by(DataProcess) %>%
+    mutate(residual = mean(tfr_adj - predicted)) %>%
+    ungroup() %>%
+    mutate(tfr_adj = tfr_adj - residual)
+}
+
+afghan1950 %>%
+  group_by(DataProcessType) %>%
+  summarise(mean = mean(tfr_adj - DataValue) %>% round(2), 
+            sd = sd(tfr_adj - DataValue) %>% round(2))
+
+## Test out on Rwanda
+rwanda1950 <- tfr1950_pred %>%
+  filter(Country.or.area == "Rwanda")
+
+for(i in 1:50) {
+  rwanda_model <- best_model("Rwanda", tfr_var = "tfr_adj", df = rwanda1950, print.plot = FALSE)
+  rwanda1950 <- rwanda1950 %>%
+    mutate(year_ctr = year - mean(year)) %>%
+    mutate(predicted = predict(rwanda_model$model, newdata = .)) %>%
+    group_by(DataProcess) %>%
+    mutate(residual = mean(tfr_adj - predicted)) %>%
+    ungroup() %>%
+    mutate(tfr_adj = tfr_adj - residual)
+}
+
+rwanda1950 %>%
+  group_by(DataProcess) %>%
+  summarise(mean = mean(tfr_adj - DataValue) %>% round(2), 
+            sd = sd(tfr_adj - DataValue) %>% round(2))
+```
+
+## Building our own clusters
+
+```{r}
+read.csv("Processed data/all_covariates_scaled.csv", stringsAsFactors = FALSE)
+pca_post2000 <- prcomp(~abortion_legality+outdoor_pollution+coal_pollution_pc+contraception_use+corn_grams+diabetes_prev+
+                         fourwheelers_pc+haqi+health_access+majority_muslim+pct_under_150_per_sqkm+pct_1000_per_sqkm+redmeat_grams+
+                         rice_grams+war_mortality_10yr+water_prop+pct_under30+pct_over_65+crop_prod+cropland+electricity+
+                         gdp+gdppc+infant_mortality+lifeexp+livestock_prod+net_exports+net_fdi, 
+                       data = all_covariates.scaled %>% filter(year_id >= 2000))
+
+covariates_pcs_post2000 <- bind_cols(all_covariates.scaled %>% filter(year_id >= 2000) %>%
+                                       select(location_name, region, development),
+                                     as.data.frame(pca_post2000$x)) %>%
+  group_by(location_name, region, development) %>%
+  summarise_at(4:31, mean) %>%
+  ungroup()
+
+# mds_post2000 <- cmdscale(dist(covariates_pcs_post2000[,4:31]), k = 5)
+# mds_post2000_df <- tibble(country = covariates_pcs_post2000$location_name,
+#                          region = covariates_pcs_post2000$region,
+#                          development = covariates_pcs_post2000$development,
+#                          Dim1 = mds_post2000[,1],
+#                          Dim2 = mds_post2000[,2],
+#                          Dim3 = mds_post2000[,3],
+#                          Dim4 = mds_post2000[,4],
+#                          Dim5 = mds_post2000[,5])
+
+# ggplot(mds_post2000_df, aes(x = Dim1, y = Dim2, col = development)) +
+#   geom_text(aes(label = country), size = 2) +
+#   labs(title = "2-dimensional scaling on covariate principal components")
+
+k = 10
+# mds_kmeans <- kmeans(mds_post2000, k)
+# mds_post2000_df$cluster <- mds_kmeans$cluster
+# 
+# ggplot(mds_post2000_df, aes(x = Dim1, y = Dim2, col = factor(cluster))) +
+#   geom_text(aes(label = country), size = 3) +
+#   labs(title = "2-dimensional scaling on covariate principal components")
+
+pca_kmeans <- kmeans(covariates_pcs_post2000 %>% select(starts_with("PC")), k)
+covariates_pcs_post2000$cluster <- pca_kmeans$cluster
+
+ggplot(covariates_pcs_post2000, aes(x = PC1, y = PC2, col = development)) +
+  geom_text(aes(label = location_name), size = 3) +
+  labs(title = "First two covariate principal components")
+
+ggplot(covariates_pcs_post2000, aes(x = PC1, y = PC2, col = factor(cluster))) +
+  geom_text(aes(label = location_name), size = 3) +
+  labs(title = "First two covariate principal components")
+```
+
