@@ -128,22 +128,23 @@ nearestCountries("United States of America", n = 3) %>% View()
 nearestCountries("United States of America", use_int = FALSE, n = 3) %>% View()
 
 #### imputeNearest() function
-imputeNearest <- function(country_name, year, compute_changes = FALSE, dist_fun = "manhattan", n = 1, max_years = 3, data = country_windows, 
+imputeNearest <- function(country_name, impute_year, compute_changes = FALSE, dist_fun = "manhattan", n = 1, max_years = 3, data = country_windows, 
                           tfr_data = tfr1950_pred) {
   ## Takes same arguments as neighbors_df, plus arguments for the TFR data
   ## max_years argument: number of nearby years by which to find 
   require(dplyr)
+  require(Hmisc)
   require(reshape2)
   require(tidyr)
   
   previous_year <- tfr_data %>%
-    filter(Country.or.area == country_name, lubridate::year(TimeMid) < year) %>%
+    filter(Country.or.area == country_name, year < impute_year) %>%
     pull(year) %>%
     max()
   
   ## Compute neighbors data frames
   neighbors_df <- nearestCountries(country_name, use_int = !compute_changes, dist_fun = dist_fun, n = n, data = country_windows) %>%
-    mutate(year_diff = year - mid_year) %>%
+    mutate(year_diff = impute_year - mid_year) %>%
     arrange(abs(year_diff)) %>%
     # Take nearest three years
     head(max_years) %>%
@@ -165,18 +166,26 @@ imputeNearest <- function(country_name, year, compute_changes = FALSE, dist_fun 
   neighbors_df <- cbind(country_tbl, weight_tbl) %>%
     mutate(weight = as.numeric(weight)/sum(as.numeric(weight)))
   
-  coefs_df <- merge(neighbors_df, country_windows, by.x = c("year", "country"), by.y = c("year_mid", "country"), all.x = TRUE)
+  coefs_df <- merge(neighbors_df, country_windows, by.x = c("mid_year", "country"), by.y = c("year_mid", "country"), all.x = TRUE)
   
   ## Imputations from nearby countries
   if(!compute_changes) { # when imputing using levels
     coefs_df <- coefs_df %>%
-      mutate(pred = b0 + b1*(year - mid_year) + b2*(year - mid_year)^2)
+      mutate(pred = b0 + b1*(impute_year - mid_year) + b2*(impute_year - mid_year)^2)
+    pred <- Hmisc::wtd.mean(coefs_df$pred, weights = coefs_df$weight)
+    pred_sd <- sqrt(nrow(coefs_df)*sum(coefs_df$weight*(coefs_df$pred - pred)^2)/(nrow(coefs_df) - 1))
   } else if(compute_changes) { # when imputing using changes
     coefs_df <- coefs_df %>%
-      mutate(pred = b1 + 2*b2*(year - mid_year))
+      mutate(pred = b1 + b2*(impute_year - mid_year))
+    pred <- Hmisc::wtd.mean(coefs_df$pred, weights = coefs_df$weight)
+    pred_sd <- sqrt(nrow(coefs_df)*sum(coefs_df$weight*(coefs_df$pred - pred)^2)/(nrow(coefs_df) - 1))
   }
-  return_obj <- list(neighbors = neighbors_df, coefs = coefs_df)
+  return_obj <- list(tfr = pred, tfr_sd = pred_sd, neighbors = coefs_df)
   return(return_obj)
 }
 
-imputeNearest("Afghanistan", year = 1985, n = 3)
+imputeNearest("Afghanistan", impute_year = 1985, n = 3)
+imputeNearest("Afghanistan", impute_year = 1985, compute_changes = TRUE, n = 3)
+
+imputeNearest("Canada", impute_year = 1985, n = 4)
+imputeNearest("Canada", impute_year = 1985, compute_changes = TRUE, n = 5)
