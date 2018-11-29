@@ -4,14 +4,16 @@
 ## List countries 
 countries <- unique(tfr1950$Country.or.area)
 
-## Go by ten-year windows, moving five years at a time
-mid_years <- seq(from = 1954.5, to = 2004.5, by = 5)
-year_windows <- data.frame(year_start = mid_years - 4.5, 
-                           year_end = mid_years + 4.5)
+## Go by 15-year windows, moving one year at a time
+window_size = 15
+mid_years <- seq(from = 1950 + (window_size - 1)/2, to = 2006, by = 1)
+year_windows <- data.frame(year_start = mid_years - (window_size - 1)/2, 
+                           
+                           year_end = mid_years + (window_size - 1)/2)
 
 country_windows <- expand.grid(country = countries, year_start = year_windows$year_start) %>%
   merge(year_windows) %>%
-  mutate(year_mid = year_start + 4.5,
+  mutate(year_mid = year_start + (window_size - 1)/2,
          country = as.character(country)) %>%
   select(country, year_start, year_mid, year_end) %>%
   arrange(country, year_start) %>%
@@ -43,17 +45,11 @@ for(i in 1:nrow(country_windows)) {
   }
 }
 
-## Compute distances on complete data
-qa_complete <- country_windows %>%
-  na.omit() %>%
-  dplyr::select(b0, b1, b2)
-
-coef_dist <- dist(qa_complete, method = "manhattan") %>% as.matrix() # distance matrix; use Manhattan
-
 ## nearestCountries() function
-nearestCountries <- function(country_name, dist_fun = "manhattan", n = 1, data = country_windows) {
+nearestCountries <- function(country_name, use_int = TRUE, dist_fun = "manhattan", n = 1, data = country_windows) {
   ## Input the country name, and number of nearest neighbors you want
   ## dist_method defaults to Manhattan distance while n defaults to 1
+  ## use_int: do you want to compute distance using local slope or local value?
   require(dplyr)
   qa_complete <- data %>% na.omit()
   
@@ -65,7 +61,9 @@ nearestCountries <- function(country_name, dist_fun = "manhattan", n = 1, data =
   
   ## Initialize data frame to store nearest countries and distances
   nn_df <- tibble(country = country_name,
-                  year = start_years)
+                  start_year = start_years,
+                  mid_year = start_year + (window_size - 1)/2,
+                  end_year = start_year + (window_size - 1))
   for(i in 1:n) {
     nn_df[, paste0("Country", i)] <- NA
     nn_df[, paste0("Dist", i)] <- NA
@@ -86,9 +84,16 @@ nearestCountries <- function(country_name, dist_fun = "manhattan", n = 1, data =
       filter(country != country_name)
     
     ## Compute distance and arrange
-    current_data <- current_data %>%
-      mutate(manhattan = abs(b0 - coefs[1]) + abs(b1 - coefs[2]) + abs(b2 - coefs[3]),
-             euclidean = (b0 - coefs[1])^2 + (b1 - coefs[2])^2 + (b2 - coefs[3])^2)
+    if(use_int) {
+      current_data <- current_data %>%
+        mutate(manhattan = abs(b0 - coefs[1]) + abs(b1 - coefs[2]) + abs(b2 - coefs[3]),
+               euclidean = (b0 - coefs[1])^2 + (b1 - coefs[2])^2 + (b2 - coefs[3])^2)
+    } else if(!use_int) {
+      current_data <- current_data %>%
+        mutate(manhattan = abs(b1 - coefs[2]) + 2*abs(b2 - coefs[3]),
+               euclidean = (b1 - coefs[2])^2 + 4*(b2 - coefs[3])^2)
+    }
+    
     
     if(grepl("euc", dist_fun, ignore.case = TRUE)) {
       neighbors <- current_data %>%
@@ -114,3 +119,73 @@ nearestCountries <- function(country_name, dist_fun = "manhattan", n = 1, data =
 
 ## Test:
 nearestCountries("Afghanistan", n = 3)
+nearestCountries("Afghanistan", use_int = FALSE, n = 3)
+
+nearestCountries("China", n = 3) %>% View()
+nearestCountries("China", use_int = FALSE, n = 3) %>% View()
+
+nearestCountries("United States of America", n = 3) %>% View()
+nearestCountries("United States of America", use_int = FALSE, n = 3) %>% View()
+
+#### imputeNearest() function
+imputeNearest <- function(country_name, impute_year, compute_changes = FALSE, dist_fun = "manhattan", n = 1, max_years = 3, data = country_windows, 
+                          tfr_data = tfr1950_pred) {
+  ## Takes same arguments as neighbors_df, plus arguments for the TFR data
+  ## max_years argument: number of nearby years by which to find 
+  require(dplyr)
+  require(Hmisc)
+  require(reshape2)
+  require(tidyr)
+  
+  previous_year <- tfr_data %>%
+    filter(Country.or.area == country_name, year < impute_year) %>%
+    pull(year) %>%
+    max()
+  
+  ## Compute neighbors data frames
+  neighbors_df <- nearestCountries(country_name, use_int = !compute_changes, dist_fun = dist_fun, n = n, data = country_windows) %>%
+    mutate(year_diff = impute_year - mid_year) %>%
+    arrange(abs(year_diff)) %>%
+    # Take nearest three years
+    head(max_years) %>%
+    dplyr::select(-country, -start_year, -end_year, -year_diff) %>%
+    mutate_at(vars(starts_with("Dist")), function(x) return(1/x)) %>%
+    reshape2::melt(id.vars = "mid_year") %>%
+    mutate(variable = case_when(grepl("Country", variable) ~ "Country",
+                                grepl("Dist", variable) ~ "Weight"))
+  
+  ## Merge in coefficients from nearby countries' quadratic approximations
+  country_tbl <- neighbors_df %>%
+    filter(variable == "Country") %>%
+    dplyr::select(mid_year = mid_year, country = value)
+  
+  weight_tbl <- neighbors_df %>%
+    filter(variable == "Weight") %>%
+    dplyr::select(weight = value)
+  
+  neighbors_df <- cbind(country_tbl, weight_tbl) %>%
+    mutate(weight = as.numeric(weight)/sum(as.numeric(weight)))
+  
+  coefs_df <- merge(neighbors_df, country_windows, by.x = c("mid_year", "country"), by.y = c("year_mid", "country"), all.x = TRUE)
+  
+  ## Imputations from nearby countries
+  if(!compute_changes) { # when imputing using levels
+    coefs_df <- coefs_df %>%
+      mutate(pred = b0 + b1*(impute_year - mid_year) + b2*(impute_year - mid_year)^2)
+    pred <- Hmisc::wtd.mean(coefs_df$pred, weights = coefs_df$weight)
+    pred_sd <- sqrt(nrow(coefs_df)*sum(coefs_df$weight*(coefs_df$pred - pred)^2)/(nrow(coefs_df) - 1))
+  } else if(compute_changes) { # when imputing using changes
+    coefs_df <- coefs_df %>%
+      mutate(pred = b1 + b2*(impute_year - mid_year))
+    pred <- Hmisc::wtd.mean(coefs_df$pred, weights = coefs_df$weight)
+    pred_sd <- sqrt(nrow(coefs_df)*sum(coefs_df$weight*(coefs_df$pred - pred)^2)/(nrow(coefs_df) - 1))
+  }
+  return_obj <- list(tfr = pred, tfr_sd = pred_sd, neighbors = coefs_df)
+  return(return_obj)
+}
+
+imputeNearest("Afghanistan", impute_year = 1985, n = 3)
+imputeNearest("Afghanistan", impute_year = 1985, compute_changes = TRUE, n = 3)
+
+imputeNearest("Canada", impute_year = 1985, n = 4)
+imputeNearest("Canada", impute_year = 1985, compute_changes = TRUE, n = 4)
