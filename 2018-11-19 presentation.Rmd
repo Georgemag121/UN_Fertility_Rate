@@ -243,7 +243,7 @@ covariates_pcs_post2000 <- bind_cols(all_covariates.scaled %>% filter(year_id >=
                                        select(location_name, region, development),
                                      as.data.frame(pca_post2000$x)) %>%
   group_by(location_name, region, development) %>%
-  summarise_at(4:31, mean) %>%
+  summarise_at(vars(starts_with("PC")), mean, na.rm = TRUE) %>%
   ungroup()
 
 # mds_post2000 <- cmdscale(dist(covariates_pcs_post2000[,4:31]), k = 5)
@@ -280,3 +280,8 @@ ggplot(covariates_pcs_post2000, aes(x = PC1, y = PC2, col = factor(cluster))) +
   labs(title = "First two covariate principal components")
 ```
 
+
+### Notes
+HDI + seeing how local quadratic model coefficients fit well
+ANOVA:
+  1) Polynomial residuals -> see if consistently above or below by country, cluster by bias of each source
