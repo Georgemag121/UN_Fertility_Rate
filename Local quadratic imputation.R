@@ -188,4 +188,3 @@ imputeNearest("Afghanistan", impute_year = 1985, n = 3)
 imputeNearest("Afghanistan", impute_year = 1985, compute_changes = TRUE, n = 3)
 
 imputeNearest("Canada", impute_year = 1985, n = 4)
-imputeNearest("Canada", impute_year = 1985, compute_changes = TRUE, n = 5)
