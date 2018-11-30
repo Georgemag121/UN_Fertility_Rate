@@ -77,7 +77,7 @@ nearestCountries <- function(country_name, use_int = TRUE, dist_fun = "manhattan
     
     ## Pull coefficients for the current year
     coefs <- (current_data %>%
-      filter(country == country_name))[, c("b0", "b1", "b2")] %>%
+                filter(country == country_name))[, c("b0", "b1", "b2")] %>%
       t()
     
     current_data <- current_data %>%
@@ -188,4 +188,4 @@ imputeNearest("Afghanistan", impute_year = 1985, n = 3)
 imputeNearest("Afghanistan", impute_year = 1985, compute_changes = TRUE, n = 3)
 
 imputeNearest("Canada", impute_year = 1985, n = 4)
-imputeNearest("Canada", impute_year = 1985, compute_changes = TRUE, n = 4)
+imputeNearest("Canada", impute_year = 1985, compute_changes = TRUE, n = 5)
