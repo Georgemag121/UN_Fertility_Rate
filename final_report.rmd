@@ -1,0 +1,179 @@
+---
+title: "UN Fertility Rate"
+author: "Karen Cao, Mac Tan, Tana Wuren, George Yang"
+date: "11/30/2018"
+output: html_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# Load all required dependencies
+library(openxlsx)
+library(tidyverse)
+library(lubridate)
+library(stats)
+library(data.table)
+library(gridExtra)
+library(gganimate)
+```
+
+## Background
+
+
+## Distributions and Summary Statistics
+
+### Loading data
+
+```{r, warning = FALSE}
+tfr = read.csv("tfr_data.csv", header = T)
+subregion = read.csv("un_subregion.csv", header = T)
+tfr = merge(x = tfr, y = subregion[ , -1], by = "ISO.code")
+tfr$TimeMid = as.Date.character(format(date_decimal(tfr$TimeMid), "%Y-%m-%d"))
+tfr <- tfr %>% mutate(year = year(TimeMid)) %>% filter(year <= 2016, year >= 1950)
+# year 1950-2016
+```
+
+### Total Fertility Rate
+```{r}
+hist(tfr$DataValue, xlab = "TFR", main = "Histogram of TFR")
+barplot(table(tfr$DataProcessType), main = "type of process used to collect the data")
+```
+
+### Data Process Type
+```{r}
+barplot(table(tfr$DataProcessType), main = "type of process used to collect the data")
+```
+
+### Recall Lag
+```{r}
+hist(tfr$RecallLag, main = "Distribution of 'RecallLag'", xlab = "RecallLag")
+```
+
+## Converting data
+```{r}
+tfr_m <- tfr %>% group_by(year, ISO.code, Country.or.area) %>% summarise(DataValue = mean(DataValue)) %>% arrange(ISO.code, year) %>% ungroup()
+```
+
+## Polynomial model
+```{r}
+best_model <- function(country, df = tfr_m, tfr_var = "DataValue", max_degree = 10, print.plot = TRUE) {
+  ## Load dplyr (required)
+  require(dplyr)
+  
+  ## Create country data frame
+  country_data <- df %>%
+    filter(Country.or.area == country, year >= 1950, year <= 2016)
+  mean_year <- mean(country_data$year)
+  country_data <- country_data %>%
+    mutate(year_ctr = year - mean_year)
+  
+  ## Initialize values for loop
+  n <- nrow(country_data)
+  current_formula <- paste0(tfr_var,"~year_ctr")
+  best_model <- lm(formula(current_formula), data = country_data)
+  best_degree <- 1
+  p_value <- NA
+  
+  ## Iteratively increase degree of polynomial and test if last degree is significant
+  for(i in 2:max_degree) {
+    ## Stitch new term onto polynomial
+    new_formula <- paste0(current_formula,"+I(year_ctr^",i,")")
+    new_model <- lm(formula(new_formula), data = country_data)
+    compare_anova <- anova(new_model, best_model)
+    
+    ## Is it significant? 
+    if((compare_anova$`Pr(>F)`[2] < 0.05) & is.na(compare_anova$`Pr(>F)`[2]) == FALSE) {
+      best_model <- new_model
+      best_degree <- i # If so, save the degree as the best one
+      p_value <- compare_anova$`Pr(>F)`[2]
+    }
+    ## Try the next polynomial degree
+    current_formula <- new_formula
+  }
+  
+  year1 <- data.frame(year = 1950:2016, year_ctr = 1950:2016 - mean_year)
+  predictions <- predict(best_model, newdata = year1, interval = "confidence")
+  country.pred <- tibble(year = 1950:2016) %>%
+    mutate(fit = predictions[,1],
+           lwr = predictions[,2],
+           upr = predictions[,3])
+  
+  ## Print plot if specified
+  if(print.plot) {
+    p <- ggplot() + 
+      geom_point(data = country_data, aes(year, DataValue)) + 
+      geom_line(data = country.pred, aes(year, fit)) + 
+      geom_ribbon(data = country.pred, aes(year, ymin = lwr, ymax = upr), alpha = 0.4) + 
+      scale_y_continuous(limits = c(0, 11.5)) + 
+      ggtitle(paste(country)) +
+      lims(x = c(1950,2016))
+    print(p)
+  }
+  
+  ## Create the object to be returned
+  return_object <- list(model = best_model)
+  return_object$data <- country_data
+  return_object$details <- list(degree = best_degree, 
+                                      R2 = summary(best_model$adj.r.squared),
+                                      RMSE = sqrt(sum(residuals(best_model)^2)/length(residuals(best_model))))
+  return_object$predictions <- country.pred
+  
+  return(return_object)
+}
+```
+
+```{r}
+df_jp <- tfr_m %>% filter(Country.or.area == "Japan", year >= 1950, year <= 2016)
+mean_year <- mean(df_jp$year)
+df_jp <- df_jp %>% mutate(year_ctr = year - mean_year)
+
+n <- nrow(df_jp)
+current_formula <- paste0("DataValue", "~year_ctr")
+m1 <- lm(formula(current_formula), data = df_jp)
+mods <- vector("list", 6)
+mods[[1]] <- m1
+
+year1 <- data.frame(year = 1950:2016, year_ctr = 1950:2016 - mean_year)
+predictions <- predict(m1, newdata = year1, interval = "confidence")
+jp.pred <- tibble(year = 1950:2016) %>%
+    mutate(fit = predictions[,1],
+           lwr = predictions[,2],
+           upr = predictions[,3],
+           model = 1) %>% as.data.frame()
+
+for (i in 2:6) {
+  new_formula <- paste0(current_formula, "+I(year_ctr^",i,")")
+  mods.tmp <- lm(formula(new_formula), data = df_jp)
+  pred.tmp <- predict(mods.tmp, newdata = year1, interval = "confidence")
+  df.tmp <- tibble(year = 1950:2016) %>%
+    mutate(fit = pred.tmp[,1],
+           lwr = pred.tmp[,2],
+           upr = pred.tmp[,3],
+           model = i)
+  jp.pred <- rbind.data.frame(jp.pred, df.tmp)
+  current_formula <- new_formula
+}
+
+ggplot(jp.pred, aes(year, fit)) +
+  geom_line(col = "cornflowerblue", lwd = 1.2) +
+  geom_ribbon(aes(year, ymin = lwr, ymax = upr), alpha = 0.4, col = "cornflowerblue", fill = "cornflowerblue") + 
+  geom_point(aes(x = year, y = DataValue), data = df_jp) +
+  transition_states(model,
+                    transition_length = 0.5,
+                    state_length = 0.5) +
+  labs(title = "Japan; Degree: {closest_state}")
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
