@@ -165,7 +165,11 @@ ggplot(jp.pred, aes(year, fit)) +
 
 ```
 
+## Testing against UN predictions
+```{r}
+wpp_raw <- read.csv("wpp2017-covariates.csv", header = T)
 
+```
 
 
 
