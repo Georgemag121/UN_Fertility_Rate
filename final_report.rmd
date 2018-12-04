@@ -24,13 +24,15 @@ library(gganimate)
 
 ### Loading data
 
+
 ```{r, warning = FALSE}
-tfr = read.csv("tfr_data.csv", header = T)
+tfr <- read.csv("tfr.csv", header = T)
+#tfr = read.csv("tfr_data.csv", header = T)
 subregion = read.csv("un_subregion.csv", header = T)
 tfr = merge(x = tfr, y = subregion[ , -1], by = "ISO.code")
 tfr$TimeMid = as.Date.character(format(date_decimal(tfr$TimeMid), "%Y-%m-%d"))
 tfr <- tfr %>% mutate(year = year(TimeMid)) %>% filter(year <= 2016, year >= 1950)
-# year 1950-2016
+# year 1950-2016, no more tfr1950
 ```
 
 ### Total Fertility Rate
@@ -47,6 +49,23 @@ barplot(table(tfr$DataProcessType), main = "type of process used to collect the 
 ### Recall Lag
 ```{r}
 hist(tfr$RecallLag, main = "Distribution of 'RecallLag'", xlab = "RecallLag")
+```
+
+## Initial Plot
+```{r}
+tfr_plot = function(country){
+  ggplot(tfr[which(tfr$Country.or.area == country), ], aes(x = TimeMid, y = DataValue, col = Series)) + 
+    #geom_point(aes(size = 7 - sqrt(-RecallLag)/2)) + 
+    geom_point() +
+    geom_line() + 
+    scale_x_date(date_labels = "%Y") + 
+    #geom_smooth() + 
+    ggtitle(paste(country)) + 
+    scale_y_continuous(limits = c(0, 11.5)) + 
+    guides(fill = F) + 
+    theme_bw()
+}
+tfr_plot("Afghanistan")
 ```
 
 ## Converting data
@@ -167,12 +186,16 @@ ggplot(jp.pred, aes(year, fit)) +
 
 ## Testing against UN predictions
 ```{r}
-wpp_raw <- read.csv("wpp2017-covariates.csv", header = T)
-
+wpp_raw <- read.csv("wpp2017-fertility-estimates.csv", header = T)
+wpp <- wpp_raw %>% filter(Indicator == "TFR") %>% rename(month = Year) %>% mutate(year = substr(month, 1, 4)) %>% left_join(subregion[, c(2,1)], by = c("LocID" = "ISO.code"))
 ```
 
-
-
+```{r}
+tfr1950_pred <- tfr %>%
+  as.tbl() %>%
+  # Create bias variable, adjusted TFR
+  mutate(residual = 0, tfr_adj = DataValue, tfr_adj_new = tfr_adj)
+```
 
 
 
