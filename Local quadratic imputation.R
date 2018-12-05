@@ -2,7 +2,7 @@
 
 #### First: obtaining local quadratic approximations
 ## List countries 
-countries <- unique(tfr1950$Country.or.area)
+countries <- unique(tfr$Country.or.area)
 
 ## Go by 15-year windows, moving one year at a time
 window_size = 15
@@ -117,16 +117,6 @@ nearestCountries <- function(country_name, use_int = TRUE, dist_fun = "manhattan
   return(nn_df)
 }
 
-## Test:
-nearestCountries("Afghanistan", n = 3)
-nearestCountries("Afghanistan", use_int = FALSE, n = 3)
-
-nearestCountries("China", n = 3) %>% View()
-nearestCountries("China", use_int = FALSE, n = 3) %>% View()
-
-nearestCountries("United States of America", n = 3) %>% View()
-nearestCountries("United States of America", use_int = FALSE, n = 3) %>% View()
-
 #### imputeNearest() function
 imputeNearest <- function(country_name, impute_year, compute_changes = FALSE, dist_fun = "manhattan", n = 1, max_years = 3, data = country_windows, 
                           tfr_data = tfr1950_pred) {
@@ -183,8 +173,3 @@ imputeNearest <- function(country_name, impute_year, compute_changes = FALSE, di
   return_obj <- list(tfr = pred, tfr_sd = pred_sd, neighbors = coefs_df)
   return(return_obj)
 }
-
-imputeNearest("Afghanistan", impute_year = 1985, n = 3)
-imputeNearest("Afghanistan", impute_year = 1985, compute_changes = TRUE, n = 3)
-
-imputeNearest("Canada", impute_year = 1985, n = 4)
