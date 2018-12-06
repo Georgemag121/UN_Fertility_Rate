@@ -161,7 +161,7 @@ best_model <- function(country, tfr_data = tfr_m, tfr_var = "DataValue", max_deg
     compare_anova <- anova(new_model, best_model)
     
     ## Is it significant? 
-    if((compare_anova$`Pr(>F)`[2] < 0.05) & is.na(compare_anova$`Pr(>F)`[2]) == FALSE) {
+    if((compare_anova$`Pr(>F)`[2] < 0.01) & is.na(compare_anova$`Pr(>F)`[2]) == FALSE) {
       best_model <- new_model
       best_degree <- i # If so, save the degree as the best one
       p_value <- compare_anova$`Pr(>F)`[2]
@@ -184,13 +184,14 @@ best_model <- function(country, tfr_data = tfr_m, tfr_var = "DataValue", max_deg
         geom_point(data = country_data, aes(x = year, y = DataValue, col = imputed)) + 
         geom_line(data = country.pred, aes(x = year, y = fit)) + 
         geom_ribbon(data = country.pred, aes(x = year, ymin = lwr, ymax = upr), alpha = 0.4) + 
+        scale_colour_manual(name = "Imputed?", values = c("green4", "red"), labels = c("No", "Yes")) +
         scale_y_continuous(limits = c(0, 11.5)) + 
         ggtitle(paste(country)) +
         lims(x = c(1950,2016))
       print(p)
     } else if(!imputed) {
       p <- ggplot() + 
-        geom_point(data = country_data, aes(x = year, y = DataValue)) + 
+        geom_point(data = country_data, aes(x = year, y = DataValue, col = imputed)) + 
         geom_line(data = country.pred, aes(x = year, y = fit)) + 
         geom_ribbon(data = country.pred, aes(x = year, ymin = lwr, ymax = upr), alpha = 0.4) + 
         scale_y_continuous(limits = c(0, 11.5)) + 

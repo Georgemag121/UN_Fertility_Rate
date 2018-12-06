@@ -30,7 +30,7 @@ source("library.R")
 ## Create 1950:2016 x countries tibble
 tfr_imputed <- expand.grid(year = 1950:2016, Country.or.area = unique(tfr$Country.or.area) %>% sort()) %>%
   dplyr::select(country, year) %>%
-  merge(tfr_m, by.x = c("country", "year"), by.y = c("Country.or.area", "year"), all.x = TRUE) %>%
+  merge(tfr_m, by = c("Country.or.area", "year"), all.x = TRUE) %>%
   as.tbl() %>%
   group_by(country) %>%
   mutate(ISO.code = mean(ISO.code, na.rm = TRUE),
