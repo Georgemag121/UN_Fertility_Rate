@@ -101,10 +101,8 @@ china_imputed <- best_model("China", tfr_data = tfr_with_imputations, imputed = 
 
 ## Very little data
 zambia <- best_model("Zambia")
-zambia_imputed <- best_model("Zambia", tfr_data = tfr_with_imputations, imputed = TRUE)
 
 #### Comparing to the "real" estimates ####
-
 
 tfr_imputed <- tfr_imputed %>%
   merge(wpp, by = c("Country.or.area", "year"), all.x = TRUE) %>%

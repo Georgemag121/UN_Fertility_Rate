@@ -135,7 +135,11 @@ for(i in 1:nrow(country_windows)) {
 
 #### FUNCTIONS ####
 ## best_model: find best polynomial fit to yearly average TFR
+<<<<<<< HEAD
 best_model <- function(country, tfr_data, tfr_var = "DataValue", max_degree = 10, print.plot = TRUE, imputed = FALSE, show.wpp = TRUE) {
+=======
+best_model <- function(country, tfr_data, tfr_var = "DataValue", max_degree = 10, print.plot = TRUE, imputed = FALSE) {
+>>>>>>> 5c62baed1c938b113cbeae42f0c3f2956eeed893
   ## Load dplyr (required)
   require(dplyr)
   
