@@ -82,10 +82,10 @@ tfr_adjusted %>%
 countries <- unique(tfr$Country.or.area)
 
 ## Go by 15-year windows, moving one year at a time
-window_size = 15
-mid_years <- seq(from = 1950 + (window_size - 1)/2, to = 2006, by = 1)
-year_windows <- data.frame(year_start = mid_years - (window_size - 1)/2, 
-                           
+window_size = 23
+mid_years <- seq(from = 1950 + (window_size - 1)/2, to = 2005, by = 1)
+year_windows <- data.frame(year_start = mid_years - (window_size - 1)/2,
+                           year_mid = mid_years,
                            year_end = mid_years + (window_size - 1)/2)
 
 country_windows <- expand.grid(country = countries, year_start = year_windows$year_start) %>%
@@ -96,8 +96,12 @@ country_windows <- expand.grid(country = countries, year_start = year_windows$ye
   arrange(country, year_start) %>%
   as.tbl()
 
+country_data <- country_windows %>%
+  merge(tfr, by.x = c("country", "year_mid"), by.y = c("Country.or.area", "year"), all = TRUE) %>%
+  as.tbl()
+
 ## Initialize coefficient variables
-country_windows$b2 <- country_windows$b1 <- country_windows$b0 <- NA
+country_windows$b2 <- country_windows$b1 <- country_windows$b0 <- country_windows$DataValue <- NA
 
 cat("Computing country-year local quadratic approximations....\n")
 for(i in 1:nrow(country_windows)) {
@@ -108,26 +112,30 @@ for(i in 1:nrow(country_windows)) {
   year_end <- country_windows$year_end[i]
   
   # Temporary subset of the tfr data
-  country_data_temp <- tfr_adjusted %>%
+  country_data_temp <- tfr %>%
     dplyr::filter(Country.or.area == country, year >= year_start, year <= year_end) %>%
-    # Center years at the midpoint of the window
-    mutate(year = year - year_mid)
+    # Center years at the midpoint of the window (and weight using Gaussian kernel, sd = 4)
+    mutate(year = year - year_mid,
+           weight = dnorm(year, mean = 0, sd = 4)) 
+  
+  country_windows$DataValue[i] <- country_data %>%
+    filter(year_mid == country_windows$year_mid[i], country == country_windows$country[i]) %>%
+    summarise(DataValue = mean(DataValue)) %>%
+    pull(DataValue)
   
   # If there's enough data, fit a quadratic
   if(nrow(country_data_temp) >= 3) {
-    quadratic_approximation <- lm(DataValue~year+I(year^2), data = country_data_temp)
-    country_windows[i,5:7] <- coefficients(quadratic_approximation)
+    quadratic_approximation <- lm(DataValue~year+I(year^2), data = country_data_temp, weights = weight)
+    country_windows[i,6:8] <- coefficients(quadratic_approximation)
   }
   if(i %% 67 == 0) {
     cat(country, "\n")
   }
 }
 
-
-
 #### FUNCTIONS ####
 ## best_model: find best polynomial fit to yearly average TFR
-best_model <- function(country, tfr_data = tfr_m, tfr_var = "DataValue", max_degree = 10, print.plot = TRUE, imputed = FALSE) {
+best_model <- function(country, tfr_data, tfr_var = "DataValue", max_degree = 10, print.plot = TRUE, imputed = FALSE, show.wpp = TRUE) {
   ## Load dplyr (required)
   require(dplyr)
   
@@ -161,7 +169,7 @@ best_model <- function(country, tfr_data = tfr_m, tfr_var = "DataValue", max_deg
     compare_anova <- anova(new_model, best_model)
     
     ## Is it significant? 
-    if((compare_anova$`Pr(>F)`[2] < 0.01) & is.na(compare_anova$`Pr(>F)`[2]) == FALSE) {
+    if((compare_anova$`Pr(>F)`[2] < 0.05) & is.na(compare_anova$`Pr(>F)`[2]) == FALSE) {
       best_model <- new_model
       best_degree <- i # If so, save the degree as the best one
       p_value <- compare_anova$`Pr(>F)`[2]
@@ -177,37 +185,61 @@ best_model <- function(country, tfr_data = tfr_m, tfr_var = "DataValue", max_deg
            lwr = predictions[,2],
            upr = predictions[,3])
   
-  ## Print plot if specified
-  if(print.plot) {
+  ## Create plots
+  if(show.wpp) {
+    country_data <- bind_rows(country_data, wpp %>% filter(Country.or.area == country))
     if(imputed) {
       p <- ggplot() + 
-        geom_point(data = country_data, aes(x = year, y = DataValue, col = imputed)) + 
+        geom_point(data = country_data, aes(x = year, y = DataValue, col = imputed), size = 1) + 
         geom_line(data = country.pred, aes(x = year, y = fit)) + 
         geom_ribbon(data = country.pred, aes(x = year, ymin = lwr, ymax = upr), alpha = 0.4) + 
-        scale_colour_manual(name = "Imputed?", values = c("green4", "red"), labels = c("No", "Yes")) +
+        scale_colour_manual(name = "Type", values = c("red", "green4", "#5B92E5"), labels = c("Imputed", "Original", "UN WPP 2017 est.")) +
         scale_y_continuous(limits = c(0, 11.5)) + 
         ggtitle(paste(country)) +
         lims(x = c(1950,2016))
-      print(p)
     } else if(!imputed) {
       p <- ggplot() + 
-        geom_point(data = country_data, aes(x = year, y = DataValue, col = imputed)) + 
+        geom_point(data = country_data, aes(x = year, y = DataValue, col = imputed), size = 1) + 
         geom_line(data = country.pred, aes(x = year, y = fit)) + 
         geom_ribbon(data = country.pred, aes(x = year, ymin = lwr, ymax = upr), alpha = 0.4) + 
         scale_y_continuous(limits = c(0, 11.5)) + 
         ggtitle(paste(country)) +
         lims(x = c(1950,2016))
-      print(p)
     }
+  } else if(!show.wpp) {
+    if(imputed) {
+      p <- ggplot() + 
+        geom_point(data = country_data, aes(x = year, y = DataValue, col = imputed), size = 1) + 
+        geom_line(data = country.pred, aes(x = year, y = fit)) + 
+        geom_ribbon(data = country.pred, aes(x = year, ymin = lwr, ymax = upr), alpha = 0.4) + 
+        scale_colour_manual(name = "Type", values = c("red", "green4"), labels = c("Imputed", "Original")) +
+        scale_y_continuous(limits = c(0, 11.5)) + 
+        ggtitle(paste(country)) +
+        lims(x = c(1950,2016))
+    } else if(!imputed) {
+      p <- ggplot() + 
+        geom_point(data = country_data, aes(x = year, y = DataValue, col = imputed), size = 1) + 
+        geom_line(data = country.pred, aes(x = year, y = fit)) + 
+        geom_ribbon(data = country.pred, aes(x = year, ymin = lwr, ymax = upr), alpha = 0.4) + 
+        scale_y_continuous(limits = c(0, 11.5)) + 
+        ggtitle(paste(country)) +
+        lims(x = c(1950,2016))
+    }
+  }
+  
+  ## Print plot if specified
+  if(print.plot) {
+    print(p)
   }
   
   ## Create the object to be returned
   return_object <- list(model = best_model)
-  return_object$data <- country_data
+  return_object$data <- as.tbl(country_data)
   return_object$details <- list(degree = best_degree, 
                                 R2 = summary(best_model$r.squared),
                                 RMSE = sqrt(sum(residuals(best_model)^2)/length(residuals(best_model))))
   return_object$predictions <- country.pred
+  return_object$plot <- p
   
   return(return_object)
 }
@@ -241,7 +273,8 @@ imputeNearest <- function(country, impute_year, compute_changes = FALSE, dist_fu
   neighbors_df <- nearestCountries(country_name, use_int = !compute_changes, dist_fun = dist_fun, n = n, data = country_windows) %>%
     mutate(year_diff = impute_year - mid_year) %>%
     arrange(abs(year_diff)) %>%
-    # Take nearest three years
+    
+    # Take nearest max_years years
     head(max_years) %>%
     dplyr::select(-country, -start_year, -end_year, -year_diff) %>%
     mutate_at(vars(starts_with("Dist")), function(x) return(1/x)) %>%
@@ -259,15 +292,13 @@ imputeNearest <- function(country, impute_year, compute_changes = FALSE, dist_fu
     dplyr::select(weight = value)
   
   neighbors_df <- cbind(country_tbl, weight_tbl) %>%
-    mutate(weight = as.numeric(weight)/sum(as.numeric(weight)))
+    mutate(weight = (as.numeric(weight)/sum(as.numeric(weight)))/abs(mid_year - impute_year))
   
-  coefs_df <- merge(neighbors_df, country_windows, by.x = c("mid_year", "country"), by.y = c("year_mid", "country"), all.x = TRUE)
+  coefs_df <- merge(neighbors_df, data, by.x = c("mid_year", "country"), by.y = c("year_mid", "country"), all.x = TRUE)
   
   ## Imputations from nearby countries
   if(!compute_changes) { # when imputing using levels
-    coefs_df <- coefs_df %>%
-      mutate(pred = b0 + b1*(impute_year - mid_year) + b2*(impute_year - mid_year)^2)
-    pred <- Hmisc::wtd.mean(coefs_df$pred, weights = coefs_df$weight)
+    pred <- Hmisc::wtd.mean(coefs_df$DataValue, weights = coefs_df$weight)
     pred_sd <- sqrt(nrow(coefs_df)*sum(coefs_df$weight*(coefs_df$pred - pred)^2)/(nrow(coefs_df) - 1))
   } else if(compute_changes) { # when imputing using changes
     coefs_df <- coefs_df %>%
@@ -275,6 +306,7 @@ imputeNearest <- function(country, impute_year, compute_changes = FALSE, dist_fu
     pred <- Hmisc::wtd.mean(coefs_df$pred, weights = coefs_df$weight)
     pred_sd <- sqrt(nrow(coefs_df)*sum(coefs_df$weight*(coefs_df$pred - pred)^2)/(nrow(coefs_df) - 1))
   }
+  
   return_obj <- list(tfr = pred, tfr_sd = pred_sd, neighbors = coefs_df)
   return(return_obj)
 }
@@ -324,7 +356,8 @@ nearestCountries <- function(country, use_int = TRUE, dist_fun = "manhattan", n 
       t()
     
     current_data <- current_data %>%
-      filter(country != country_name)
+      filter(country != country_name) %>%
+      na.omit()
     
     ## Compute distance and arrange
     if(use_int) {
