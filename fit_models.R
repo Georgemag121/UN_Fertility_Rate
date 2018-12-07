@@ -10,21 +10,37 @@ wpp <- wpp_raw %>%
   rename(month = Year) %>% 
   mutate(year = substr(month, 1, 4) %>% as.integer,
          Type = "UN WPP 2017") %>% 
+  rename(wpp.est = DataValue) %>%
   left_join(subregion[, c(2,1)], by = c("LocID" = "ISO.code"))
-subregion <- read.csv("un_subregion.csv", header = TRUE, stringsAsFactors = FALSE)
-tfr <- read.csv("tfr.csv", header = TRUE, stringsAsFactors = FALSE) %>%
-  # Merge in UN geographic subregions/development status
-  merge(subregion[, -1], by = "ISO.code", all.x = TRUE) %>%
-  
-  # Generate usable year variables
-  mutate(TimeMid = as.Date.character(format(date_decimal(TimeMid), "%Y-%m-%d")),
-         year = lubridate::year(TimeMid)) %>%
-  
-  # Filter to 1950-2016
-  filter(year <= 2016, year >= 1950)
+
+tfr_wpp <- left_join(tfr, wpp[, c(1,5,4)], by = c("ISO.code" = "LocID", "year" = "year"))
+wt.recall <- 1
+
+# the higher the weight, the more severe penalty towards recall lag, default is a 1 year recall lag loses 10 points in reliability
+tfr_adj <- tfr_wpp %>% 
+  mutate(diff = DataValue - wpp.est, pct.diff = abs((DataValue - wpp.est)/wpp.est), 
+         reliable = 1 - pct.diff, reliable.adj = reliable * exp(log(10/9) * wt.recall * RecallLag)) %>% 
+  group_by(DataProcessType, DataProcess, Source, DataTypeGroupName, DataTypeRecoded, region, development) %>% 
+  mutate(bias.m = mean(diff), rel.m = mean(reliable), rel.m.adj = mean(reliable.adj)) %>% 
+  ungroup() %>% 
+  mutate(DataValue = DataValue - bias.m)
+
+tfr <- tfr_adj
+
+# subregion <- read.csv("un_subregion.csv", header = TRUE, stringsAsFactors = FALSE)
+# tfr <- read.csv("tfr.csv", header = TRUE, stringsAsFactors = FALSE) %>%
+#   # Merge in UN geographic subregions/development status
+#   merge(subregion[, -1], by = "ISO.code", all.x = TRUE) %>%
+#   
+#   # Generate usable year variables
+#   mutate(TimeMid = as.Date.character(format(date_decimal(TimeMid), "%Y-%m-%d")),
+#          year = lubridate::year(TimeMid)) %>%
+#   
+#   # Filter to 1950-2016
+#   filter(year <= 2016, year >= 1950)
 
 #### Get yearly averages ####
-tfr_m <- tfr %>% 
+tfr_m <- tfr_adj %>% 
   group_by(year, ISO.code, Country.or.area) %>% 
   summarise(DataValue = mean(DataValue)) %>% 
   arrange(ISO.code, year) %>% 
@@ -46,7 +62,7 @@ tfr_imputed <- expand.grid(year = 1950:2016, Country.or.area = unique(tfr$Countr
   ungroup()
 
 ## How many neighbors?
-n_neighbors <- 5
+n_neighbors <- 7
 
 ## Make imputations
 for(i in 1:nrow(tfr_imputed)) {
@@ -69,18 +85,6 @@ tfr_with_imputations <- bind_rows(tfr %>% mutate(Type = "Original"),
 tfr_with_imputations$Type[is.na(tfr_with_imputations$Type)] <- "Imputed"
 
 save(tfr_imputed, file = paste0("tfr_imputed_", n_neighbors))
-
-## Restrict imputed values to min/max
-tfr_imputed_restricted <- tfr_imputed %>%
-  group_by(Country.or.area) %>%
-  mutate(max_obs = max(DataValue, na.rm = TRUE),
-         min_obs = min(DataValue, na.rm = TRUE)) %>%
-  ungroup() %>%
-  mutate(DataValue.imputed = case_when(
-    DataValue.imputed >= min_obs & DataValue.imputed <= max_obs ~ DataValue.imputed,
-    DataValue.imputed > max_obs ~ max_obs,
-    DataValue.imputed < min_obs ~ min_obs
-  ))
 
 #### Comparing imputed and not ####
 ## Poor quality data (Afghanistan)

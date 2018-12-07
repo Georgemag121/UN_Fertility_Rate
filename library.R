@@ -135,11 +135,7 @@ for(i in 1:nrow(country_windows)) {
 
 #### FUNCTIONS ####
 ## best_model: find best polynomial fit to yearly average TFR
-<<<<<<< HEAD
 best_model <- function(country, tfr_data, tfr_var = "DataValue", max_degree = 10, print.plot = TRUE, imputed = FALSE, show.wpp = TRUE) {
-=======
-best_model <- function(country, tfr_data, tfr_var = "DataValue", max_degree = 10, print.plot = TRUE, imputed = FALSE) {
->>>>>>> 5c62baed1c938b113cbeae42f0c3f2956eeed893
   ## Load dplyr (required)
   require(dplyr)
   
@@ -191,11 +187,16 @@ best_model <- function(country, tfr_data, tfr_var = "DataValue", max_degree = 10
   
   ## Create plots
   if(show.wpp) {
-    country_data <- bind_rows(country_data, wpp %>% filter(Country.or.area == country))
+    country_data <- bind_rows(country_data, wpp %>% 
+                                filter(Country.or.area == country) %>% 
+                                mutate(DataValue = wpp.est)
+    )
     if(imputed) {
       p <- ggplot() + 
-        geom_point(data = country_data, aes(x = year, y = DataValue, col = imputed), size = 1) + 
+        geom_point(data = country_data, aes(x = year, y = DataValue, col = Type), size = 1) + 
         geom_line(data = country.pred, aes(x = year, y = fit)) + 
+        geom_line(data = country_data %>% filter(Type == "UN WPP 2017"),
+                  aes(x = year, y = DataValue), col = "#5B92E5") +
         geom_ribbon(data = country.pred, aes(x = year, ymin = lwr, ymax = upr), alpha = 0.4) + 
         scale_colour_manual(name = "Type", values = c("red", "green4", "#5B92E5"), labels = c("Imputed", "Original", "UN WPP 2017 est.")) +
         scale_y_continuous(limits = c(0, 11.5)) + 
@@ -203,7 +204,7 @@ best_model <- function(country, tfr_data, tfr_var = "DataValue", max_degree = 10
         lims(x = c(1950,2016))
     } else if(!imputed) {
       p <- ggplot() + 
-        geom_point(data = country_data, aes(x = year, y = DataValue, col = imputed), size = 1) + 
+        geom_point(data = country_data, aes(x = year, y = DataValue), size = 1) + 
         geom_line(data = country.pred, aes(x = year, y = fit)) + 
         geom_ribbon(data = country.pred, aes(x = year, ymin = lwr, ymax = upr), alpha = 0.4) + 
         scale_y_continuous(limits = c(0, 11.5)) + 
@@ -213,7 +214,7 @@ best_model <- function(country, tfr_data, tfr_var = "DataValue", max_degree = 10
   } else if(!show.wpp) {
     if(imputed) {
       p <- ggplot() + 
-        geom_point(data = country_data, aes(x = year, y = DataValue, col = imputed), size = 1) + 
+        geom_point(data = country_data, aes(x = year, y = DataValue, col = Type), size = 1) + 
         geom_line(data = country.pred, aes(x = year, y = fit)) + 
         geom_ribbon(data = country.pred, aes(x = year, ymin = lwr, ymax = upr), alpha = 0.4) + 
         scale_colour_manual(name = "Type", values = c("red", "green4"), labels = c("Imputed", "Original")) +
@@ -222,7 +223,7 @@ best_model <- function(country, tfr_data, tfr_var = "DataValue", max_degree = 10
         lims(x = c(1950,2016))
     } else if(!imputed) {
       p <- ggplot() + 
-        geom_point(data = country_data, aes(x = year, y = DataValue, col = imputed), size = 1) + 
+        geom_point(data = country_data, aes(x = year, y = DataValue), size = 1) + 
         geom_line(data = country.pred, aes(x = year, y = fit)) + 
         geom_ribbon(data = country.pred, aes(x = year, ymin = lwr, ymax = upr), alpha = 0.4) + 
         scale_y_continuous(limits = c(0, 11.5)) + 
