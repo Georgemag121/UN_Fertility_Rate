@@ -5,85 +5,14 @@ library(stats)
 library(data.table)
 library(gridExtra)
 library(gganimate)
-
-#### Reliability adjustment ####
-a = 0.9
-# Back to 8324
-dup1 <- tfr %>% 
-  mutate(recal = exp(RecallLag*a), 
-         dhs = (DataProcess == "DHS-NS" | DataProcess == "DHS" | DataProcess == "DHS/MICS" | DataProcess == "DHS/PAPFAM"), 
-         direct = (DataTypeGroupName == "Direct" | DataTypeGroupName == "UN computed")) %>% 
-  group_by(Country.or.area, year) %>% 
-  mutate(dup = n(), 
-         tot_dir = sum(direct), 
-         tot_dhs = sum(dhs)) %>% 
-  ungroup() %>% 
-  filter(dup > 1)
-
-# 4930 with no dups group 1 and 2
-group1 <- tfr %>% 
-  mutate(recal = exp(RecallLag*a), 
-         dhs = (DataProcess == "DHS-NS" | DataProcess == "DHS" | DataProcess == "DHS/MICS" | DataProcess == "DHS/PAPFAM"), 
-         direct = (DataTypeGroupName == "Direct" | DataTypeGroupName == "UN computed")) %>% 
-  group_by(Country.or.area, year) %>% 
-  mutate(dup = n(), 
-         tot_dir = sum(direct)) %>% 
-  ungroup() %>% 
-  filter(dup == 1) %>% 
-  mutate(tfr_new = DataValue) %>% 
-  mutate(group.num = direct + 1) %>% 
-  distinct(ISO.code, Country.or.area, year, tfr_new, group.num) 
-
-# 516 dups with only one direct
-group3 <- dup1 %>% 
-  filter(tot_dir == 1, direct == TRUE) %>% 
-  mutate(tfr_new = DataValue) %>% 
-  mutate(group.num = 3) %>% 
-  distinct(ISO.code, Country.or.area, year, tfr_new, group.num) 
-
-# 781 dups with no direct, weighted avg of indirect
-group4 <- dup1 %>% 
-  filter(tot_dir == 0) %>% 
-  group_by(Country.or.area, year) %>% 
-  mutate(tfr_new = weighted.mean(DataValue, w = exp(RecallLag))) %>% 
-  ungroup() %>%  
-  mutate(group.num = 4) %>% 
-  distinct(ISO.code, Country.or.area, year, tfr_new, group.num) 
-
-# 799 dups with multiple direct and contain dhs sources
-group5 <- dup1 %>% 
-  filter(tot_dir >= 2,  tot_dhs >= 1, direct == TRUE | dhs == TRUE) %>% 
-  group_by(Country.or.area, year) %>% 
-  mutate(tfr_new = weighted.mean(DataValue, w = exp(RecallLag))) %>% 
-  ungroup() %>% 
-  mutate(group.num = 5) %>% 
-  distinct(ISO.code, Country.or.area, year, tfr_new, group.num) 
-
-# 5548 dups with multiple direct and no dhs sources
-group6 <- dup1 %>% 
-  filter(tot_dir >= 2, direct == TRUE, tot_dhs == 0) %>% 
-  group_by(Country.or.area, year) %>% 
-  mutate(tfr_new = weighted.mean(DataValue, w = exp(RecallLag))) %>% 
-  ungroup() %>% 
-  mutate(group.num = 6) %>% 
-  distinct(ISO.code, Country.or.area, year, tfr_new, group.num) 
-
-# Combine 8322, 
-tfr_adjusted <- rbind(group1, group3, group4, group5, group6) %>% 
-  arrange(Country.or.area, year) %>% 
-  mutate(indirect = (group.num == 1 | group.num == 4)) %>%
-  rename(DataValue = tfr_new)
-
-tfr_adjusted %>% 
-  filter(Country.or.area == "Zambia") %>% 
-  ggplot(aes(x = year, y = DataValue)) + geom_point(aes(col = indirect)) + geom_line() + lims(x = c(1950,2016)) + scale_y_continuous(limits = c(0, 11.5))
+library(glmnet)
 
 #### Preliminary work for nearestCountries function ####
 countries <- unique(tfr$Country.or.area)
 
 ## Go by 15-year windows, moving one year at a time
-window_size = 23
-mid_years <- seq(from = 1950 + (window_size - 1)/2, to = 2005, by = 1)
+window_size = 25
+mid_years <- seq(from = 1950, to = 2016, by = 2)
 year_windows <- data.frame(year_start = mid_years - (window_size - 1)/2,
                            year_mid = mid_years,
                            year_end = mid_years + (window_size - 1)/2)
@@ -134,17 +63,14 @@ for(i in 1:nrow(country_windows)) {
 }
 
 #### FUNCTIONS ####
-## best_model: find best polynomial fit to yearly average TFR
+## best_model: find best polynomial fit TFR data
 best_model <- function(country, tfr_data, tfr_var = "DataValue", max_degree = 10, print.plot = TRUE, imputed = FALSE, show.wpp = TRUE) {
   ## Load dplyr (required)
   require(dplyr)
   
   ## If country is ISO.code, identify country
-  if(is.numeric(country)) {
-    country <- (tfr_data %>% 
-                  dplyr::filter(ISO.code == country) %>%
-                  pull(Country.or.area))[1] %>%
-      as.character()
+  if(is.numeric(country) | is.integer(country)) {
+    country <- lookupISO(country)
   }
   
   ## Create country data frame
@@ -194,19 +120,26 @@ best_model <- function(country, tfr_data, tfr_var = "DataValue", max_degree = 10
     if(imputed) {
       p <- ggplot() + 
         geom_point(data = country_data, aes(x = year, y = DataValue, col = Type), size = 1) + 
-        geom_line(data = country.pred, aes(x = year, y = fit)) + 
         geom_line(data = country_data %>% filter(Type == "UN WPP 2017"),
                   aes(x = year, y = DataValue), col = "#5B92E5") +
+        geom_line(data = country_data %>% filter(Type == "Original"), aes(x = year, y = DataValue, linetype = Series), 
+                  col = "green4", show.legend = FALSE) +
+        geom_line(data = country.pred, aes(x = year, y = fit)) + 
         geom_ribbon(data = country.pred, aes(x = year, ymin = lwr, ymax = upr), alpha = 0.4) + 
-        scale_colour_manual(name = "Type", values = c("red", "green4", "#5B92E5"), labels = c("Imputed", "Original", "UN WPP 2017 est.")) +
+        scale_colour_manual(name = "Type", values = c("red", "green4", "#5B92E5"), labels = c("Imputed", "Original", "UN WPP 2017")) +
         scale_y_continuous(limits = c(0, 11.5)) + 
         ggtitle(paste(country)) +
         lims(x = c(1950,2016))
     } else if(!imputed) {
       p <- ggplot() + 
-        geom_point(data = country_data, aes(x = year, y = DataValue), size = 1) + 
+        geom_point(data = country_data, aes(x = year, y = DataValue, col = Type), size = 1) + 
+        geom_line(data = country_data %>% filter(Type == "UN WPP 2017"),
+                  aes(x = year, y = DataValue), col = "#5B92E5") +
+        geom_line(data = country_data %>% filter(Type == "Original"), aes(x = year, y = DataValue, linetype = Series), 
+                  col = "green4", show.legend = FALSE) +
         geom_line(data = country.pred, aes(x = year, y = fit)) + 
         geom_ribbon(data = country.pred, aes(x = year, ymin = lwr, ymax = upr), alpha = 0.4) + 
+        scale_colour_manual(name = "Type", values = c("green4", "#5B92E5"), labels = c("Original", "UN WPP 2017")) +
         scale_y_continuous(limits = c(0, 11.5)) + 
         ggtitle(paste(country)) +
         lims(x = c(1950,2016))
@@ -215,6 +148,8 @@ best_model <- function(country, tfr_data, tfr_var = "DataValue", max_degree = 10
     if(imputed) {
       p <- ggplot() + 
         geom_point(data = country_data, aes(x = year, y = DataValue, col = Type), size = 1) + 
+        geom_line(data = country_data %>% filter(Type == "Original"), aes(x = year, y = DataValue, linetype = Series), 
+                  col = "green4", show.legend = FALSE) +
         geom_line(data = country.pred, aes(x = year, y = fit)) + 
         geom_ribbon(data = country.pred, aes(x = year, ymin = lwr, ymax = upr), alpha = 0.4) + 
         scale_colour_manual(name = "Type", values = c("red", "green4"), labels = c("Imputed", "Original")) +
@@ -223,7 +158,9 @@ best_model <- function(country, tfr_data, tfr_var = "DataValue", max_degree = 10
         lims(x = c(1950,2016))
     } else if(!imputed) {
       p <- ggplot() + 
-        geom_point(data = country_data, aes(x = year, y = DataValue), size = 1) + 
+        geom_point(data = country_data, aes(x = year, y = DataValue), size = 1, col = "green4") + 
+        geom_line(data = country_data %>% filter(Type == "Original"), aes(x = year, y = DataValue, linetype = Series), 
+                  col = "green4", show.legend = FALSE) +
         geom_line(data = country.pred, aes(x = year, y = fit)) + 
         geom_ribbon(data = country.pred, aes(x = year, ymin = lwr, ymax = upr), alpha = 0.4) + 
         scale_y_continuous(limits = c(0, 11.5)) + 
@@ -249,22 +186,29 @@ best_model <- function(country, tfr_data, tfr_var = "DataValue", max_degree = 10
   return(return_object)
 }
 
+## lookupISO: translate ISO code into country name
+lookupISO <- function(code) {
+  require(dplyr)
+  country <- subregion %>%
+    filter(ISO.code == code) %>%
+    pull(Country.or.area)
+  
+  return(country)
+}
+
 ## imputeNearest: impute year from nearest-neighbor countries
 imputeNearest <- function(country, impute_year, compute_changes = FALSE, dist_fun = "manhattan", n = 1, max_years = 3, data = country_windows, 
                           tfr_data = tfr, ...) {
   ## Takes same arguments as neighbors_df, plus arguments for the TFR data
-  ## max_years argument: number of nearby years by which to find 
+  ## max_years argument: number of nearby years by which to find neighbors
   require(dplyr)
   require(Hmisc)
   require(reshape2)
   require(tidyr)
   
   ## If country is ISO.code, identify country
-  if(is.numeric(country)) {
-    country_name <- (tfr_data %>% 
-                  dplyr::filter(ISO.code == country) %>%
-                  pull(Country.or.area))[1] %>%
-      as.character()
+  if(is.numeric(country) | is.integer(country)) {
+    country_name <- lookupISO(country)
   } else {
     country_name <- country
   }
@@ -324,11 +268,8 @@ nearestCountries <- function(country, use_int = TRUE, dist_fun = "manhattan", n 
   require(dplyr)
   qa_complete <- data %>% na.omit()
   
-  if(is.numeric(country)) {
-    country_name <- (tfr_data %>% 
-                       dplyr::filter(ISO.code == country) %>%
-                       pull(Country.or.area))[1] %>%
-      as.character()
+  if(is.numeric(country) | is.integer(country)) {
+    country_name <- lookupISO(country)
   } else {
     country_name <- country
   }
