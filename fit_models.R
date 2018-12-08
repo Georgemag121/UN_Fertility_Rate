@@ -4,6 +4,13 @@ library(lubridate)
 suppressMessages(library(tidyverse))
 
 #### Read in data ####
+subregion <- read.csv("un_subregion.csv", header = T)
+tfr <- read.csv("tfr.csv", stringsAsFactors = FALSE) %>%
+  merge(subregion[, -1], by = "ISO.code", all.x = TRUE) %>%
+  mutate(TimeMid = as.Date.character(format(date_decimal(TimeMid), "%Y-%m-%d")),
+         year = year(TimeMid),
+         Type = "Original") %>% 
+  filter(year <= 2016, year >= 1950)
 wpp_raw <- read.csv("wpp2017-fertility-estimates.csv", header = T)
 wpp <- wpp_raw %>% 
   filter(Indicator == "TFR") %>% 
@@ -51,7 +58,7 @@ source("library.R")
 
 #### Impute missing years ####
 ## Create 1950:2016 x countries tibble
-tfr_imputed <- expand.grid(year = 1950:2016, Country.or.area = unique(tfr$Country.or.area) %>% sort()) %>%
+tfr_imputed <- expand.grid(year = seq(from = 1950, to = 2016, by = 2), Country.or.area = unique(tfr$Country.or.area) %>% sort()) %>%
   dplyr::select(Country.or.area, year) %>%
   merge(tfr_m, by = c("Country.or.area", "year"), all.x = TRUE) %>%
   as.tbl() %>%
@@ -86,47 +93,17 @@ tfr_with_imputations$Type[is.na(tfr_with_imputations$Type)] <- "Imputed"
 
 save(tfr_imputed, file = paste0("tfr_imputed_", n_neighbors))
 
-#### Comparing imputed and not ####
-## Poor quality data (Afghanistan)
-afghanistan <- best_model("Afghanistan")
-afghanistan_imputed <- best_model("Afghanistan", tfr_data = tfr_with_imputations, imputed = TRUE)
-
-## High quality data (United States)
-canada <- best_model("Canada")
-canada_imputed <- best_model("Canada", tfr_data = tfr_with_imputations, imputed = TRUE)
-
-## Medium quality data (Brazil)
-brazil <- best_model("Brazil")
-brazil_imputed <- best_model("Brazil", tfr_data = tfr_with_imputations, imputed = TRUE)
-
-## A lot of data of middling quality (China)
-china <- best_model("China")
-china_imputed <- best_model("China", tfr_data = tfr_with_imputations, imputed = TRUE)
-
-## Very little data
-zambia <- best_model("Zambia")
-
-#### Comparing to the "real" estimates ####
-
-tfr_imputed <- tfr_imputed %>%
-  merge(wpp, by = c("Country.or.area", "year"), all.x = TRUE) %>%
-  as.tbl() %>%
-  mutate(error = DataValue.imputed - DataValue.y)
-
-tfr_imputed %>%
-  summarise(RMSE = sqrt(sum(error^2, na.rm = TRUE)/sum(!is.na(DataValue.x))))
-
-tfr_imputed %>%
-  group_by(Country.or.area) %>%
-  summarise(RMSE = sqrt(sum(error^2, na.rm = TRUE)/sum(!is.na(DataValue.x)))) %>%
-  View()
-
-## Plotting all the things
-plot_list <- vector("list", 2*n_distinct(tfr_with_imputations$Country.or.area))
+## Plotting all the things (and also evaluating in-sample performance)
+plot_list <- models_list <- vector("list", 2*n_distinct(tfr_with_imputations$Country.or.area))
 country_list <- unique(tfr_with_imputations$Country.or.area)
 for(i in 2*(1:n_distinct(tfr_with_imputations$Country.or.area))) {
   country <- country_list[i/2]
-  plot_list[[i-1]] <- best_model(country, tfr_data = tfr)$plot
-  plot_list[[i]] <- best_model(country, tfr_data = tfr_with_imputations, imputed = TRUE)$plot
+  models_list[[i-1]] <- best_model(country, tfr_data = tfr %>% mutate(Type = "Original") %>% bind_rows(wpp))
+  models_list[[i]] <- best_model(country, tfr_data = tfr_with_imputations, imputed = TRUE)
+  plot_list[[i-1]] <- models_list[[i-1]]$plot
+  plot_list[[i]] <- models_list[[i]]$plot
 }
-ggsave(filename = "country_plots.pdf", marrangeGrob(grobs = plot_list, nrow = 2, ncol = 2))
+
+ggsave(filename = "country_plots.pdf", marrangeGrob(grobs = plot_list, nrow = 2, ncol = 1))
+
+sapply()
