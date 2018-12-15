@@ -3,8 +3,8 @@ plot_list <- models_list <- vector("list", 2*n_distinct(tfr_with_imputations$Cou
 country_list <- unique(tfr_with_imputations$Country.or.area)
 for(i in 2*(1:n_distinct(tfr_with_imputations$Country.or.area))) {
   country <- country_list[i/2]
-  models_list[[i-1]] <- best_model(country, tfr_data = tfr %>% bind_rows(wpp))
-  models_list[[i]] <- best_model(country, tfr_data = tfr_with_imputations, imputed = TRUE)
+  models_list[[i-1]] <- best_model(country, tfr_data = tfr %>% bind_rows(wpp), fix.y.axis = FALSE)
+  models_list[[i]] <- best_model(country, tfr_data = tfr_with_imputations, imputed = TRUE, fix.y.axis = FALSE)
   plot_list[[i-1]] <- models_list[[i-1]]$plot
   plot_list[[i]] <- models_list[[i]]$plot
 }
@@ -47,3 +47,5 @@ country_MADs %>%
 country_RMSEs %>%
   summarise(without_imputations = sqrt(mean(without_imputations^2, na.rm = TRUE)),
             with_imputations = sqrt(mean(with_imputations^2, na.rm = TRUE)))
+
+write.csv(country_RMSEs, "country_RMSEs.csv", row.names = FALSE)
