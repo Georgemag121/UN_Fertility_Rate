@@ -1,0 +1,211 @@
+---
+title: "Computing missing data by borrowing strength from similar countries"
+author: Karen Cao
+output: html_notebook
+---
+```{r, warning = FALSE, include = FALSE, message = FALSE}
+# Load all required dependencies
+library(openxlsx)
+library(tidyverse)
+library(lubridate)
+library(stats)
+library(data.table)
+library(gridExtra)
+library(ggplot2)
+library(FNN)
+library(dplyr)
+library(broom)
+library(tidyr)
+library(mosaic)
+```
+
+```{r, include = FALSE}
+# Load in the data
+tfr = read.csv("tfr_data.csv", header = T)
+subregion = read.csv("un_subregion.csv", header = T)
+tfr = merge(x = tfr, y = subregion[ , -1], by = "ISO.code")
+tfr$TimeMid = as.Date.character(format(date_decimal(tfr$TimeMid), "%Y-%m-%d"))
+tfr <- tfr %>% mutate(year = year(TimeMid)) %>% filter(year <= 2016)
+
+# Define tfr_m, which takes mean tfr value at each year(when data is available) regardless of reliability of different sources
+tfr_m = tfr %>% group_by(year, ISO.code, Country.or.area) %>% summarise(DataValue = mean(DataValue)) %>% arrange(ISO.code, year) %>% ungroup()
+
+# Load in the UN estimates file
+un.est = read.csv("wpp2017-fertility-estimates.csv", header = T) %>% filter(Year <= 2016, Indicator == "TFR")
+country.index = tfr_m[,2:3] %>% group_by(ISO.code, Country.or.area) %>% summarise(n = n())
+country.index = country.index[-3]
+un.est = left_join(x = un.est, y = country.index, by = c("LocID" = "ISO.code"))
+```
+
+```{r, include = FALSE}
+# Define the polynomial function
+best_model_na <- function(country, df = tfr_na, tfr_var = "DataValue", max_degree = 9, print.plot = TRUE) {
+  ## Create country data frame
+  country_data <- df %>%
+    filter(Country.or.area == country, year >= 1950, year <= 2016)
+  mean_year <- mean(country_data$year)
+  country_data <- country_data %>%
+    mutate(year_ctr = year - mean_year)
+  
+  ## Initialize values for loop
+  n <- nrow(country_data)
+  current_formula <- paste0(tfr_var,"~year_ctr")
+  best_model <- lm(formula(current_formula), data = country_data)
+  best_degree <- 1
+  p_value <- NA
+  
+  ## Iteratively increase degree of polynomial and test if last degree is significant
+  for(i in 2:max_degree) {
+    ## Stitch new term onto polynomial
+    new_formula <- paste0(current_formula,"+I(year_ctr^",i,")")
+    new_model <- lm(formula(new_formula), data = country_data)
+    compare_anova <- anova(new_model, best_model)
+    
+    ## Is it significant? 
+    if((compare_anova$`Pr(>F)`[2] < 0.01) & is.na(compare_anova$`Pr(>F)`[2]) == FALSE) {
+      best_model <- new_model
+      best_degree <- i # If so, save the degree as the best one
+      p_value <- compare_anova$`Pr(>F)`[2]
+    }
+    ## Try the next polynomial degree
+    current_formula <- new_formula
+  }
+  
+  year1 <- data.frame(year = 1950:2016, year_ctr = 1950:2016 - mean_year)
+  predictions <- predict(best_model, newdata = year1, interval = "confidence")
+  country.pred <- tibble(year = 1950:2016) %>%
+    mutate(fit = predictions[,1],
+           lwr = predictions[,2],
+           upr = predictions[,3])
+  
+  p <- ggplot() + 
+      geom_point(data = country_data, aes(year, DataValue, colour = factor(Ori))) + 
+      geom_line(data = country.pred, aes(year, fit)) + 
+      geom_line(data = un.est %>% filter(Country.or.area == country), aes(Year, DataValue, color = "red")) +
+      geom_ribbon(data = country.pred, aes(year, ymin = lwr, ymax = upr), alpha = 0.4) + 
+      scale_y_continuous(limits = c(0, 11.5)) + 
+      ggtitle(paste(country, ", degree = ", best_degree)) +
+      lims(x = c(1950,2016)) + 
+      scale_colour_discrete(name  ="Imputed?", breaks = c(0, 1), labels = c("Yes", "No"))
+    
+  ## Print plot if specified
+  if(print.plot) {
+    print(p)
+  }
+  
+  ## Create the object to be returned
+  return_object <- list(model = best_model)
+  return_object$data <- country_data
+  return_object$details <- list(degree = best_degree, 
+                                      R2 = summary(best_model$adj.r.squared),
+                                      RMSE = sqrt(sum(residuals(best_model)^2)/length(residuals(best_model))))
+  return_object$predictions <- country.pred
+  return_object$p.value <- p_value
+  return_object$plot <- p
+  
+  return(return_object)
+}
+```
+
+```{r, include = FALSE}
+# Create scaled covariates for ALL countries spanning from 1950 to 2016
+all_covariates <- read.csv("wpp2017-covariates.csv", stringsAsFactors = FALSE) %>% filter(Year >= 1950, Year <= 2016)
+all_covariates = spread(all_covariates, Indicator, DataValue)
+covariates = left_join(x= all_covariates, y = country.index, by = c("LocID" = "ISO.code"))
+covariates[, 3:13] = apply(covariates[, 3:13], 2, zscore) # scale all values
+write.csv(covariates, file = "wpp_covariates_fulltime.csv")
+```
+
+# PCA
+```{r, warning = FALSE, message = FALSE}
+# Read in the dataset that contains scaled covariates for all countries
+all_covariates = read.csv("wpp_covariates_fulltime.csv", stringsAsFactors = FALSE) %>% filter(LocID %in% unique(tfr_m$ISO.code))
+
+# Perform PCA
+pca_post = prcomp(~ PopDensity + PopGrowth + PropUrban + Q1535B + Q1535F + Q1535M + Q1545B + Q1545F + Q1545M + TotalPop + U5MR, data = all_covariates)
+covariates_pcs_post <- bind_cols(all_covariates %>% select(Country.or.area), as.data.frame(pca_post$x)) %>% group_by(Country.or.area) %>% summarise_at(2:12, mean) %>% ungroup()
+```
+
+# For each country, find its 3 most similar countries using knn
+```{r}
+# summary(pca_post) 
+
+# Find the 3 most similar countries using the first 6 PCs
+# The first 6 PCs explain 99% of the variance
+knn = knn.index(dist(covariates_pcs_post %>% select(PC1:PC6)), k = 3)
+knn.name = as.data.frame(knn)
+for (i in 1:201) {
+  knn.name[i, ] <- covariates_pcs_post$Country.or.area[knn[i, ]]
+}
+rownames(knn.name) <- covariates_pcs_post$Country.or.area
+
+# knn.name is the data frame that lists the three most similar countries for every single country
+
+head(knn.name)
+```
+
+# Compue missing data
+Wheneve the tfr data value is missing for a country at a specific year, this missing data is calculated by taking the averaged of the tfr value that year from its 3 most similar countries. The "final" dataset contains year, name of the country, tfr value and a binary indicator indicator whether the tfr value that year is original or imputed (i.e. bowrrowed strength from its three most similar countries).
+
+```{r}
+tfr_fillna = list()
+
+for(i in 1:201){
+  tfr_L = tfr_m %>% filter(Country.or.area == unique(tfr_m$Country.or.area)[i])
+  if(unique(tfr_m$Country.or.area)[i] %in% rownames(knn.name)){
+    tfr_R = tfr_m %>% filter(Country.or.area %in% knn.name[unique(tfr_m$Country.or.area)[i], ]) %>% arrange(year) %>% group_by(year) %>% summarise(DataValue = mean(DataValue)) %>% ungroup()
+    tfr_R$Country.or.area = rep(unique(tfr_m$Country.or.area)[i], nrow(tfr_R))
+    tfr_fill = full_join(tfr_L, tfr_R, by = "year") %>% arrange(year)
+    tfr_fill$Country.or.area = ifelse(is.na(tfr_fill$Country.or.area.x), as.character(tfr_fill$Country.or.area.y), as.character(tfr_fill$Country.or.area.x))
+    tfr_fill$DataValue = ifelse(is.na(tfr_fill$DataValue.x), tfr_fill$DataValue.y, tfr_fill$DataValue.x)
+    tfr_fill$Ori = ifelse(is.na(tfr_fill$DataValue.x), 0, 1) # indicate whether DataValue is borrowed from other countries/areas
+    var_keep = c("year", "Country.or.area", "DataValue", "Ori")
+    tfr_fillna[[i]] = tfr_fill[, var_keep]
+  }else{
+    tfr_fillna[[i]] = tfr_L
+  }
+}
+
+tfr_na = dplyr::bind_rows(tfr_fillna)
+head(tfr_na)
+```
+
+# Plots
+Look at plots for all countries by fitting the baseline (polynomial) model. All plots are saved in a pdf file called "Compute missing valye using knn".
+```{r, include = FALSE, warning = FALSE, message = FALSE}
+# plot_list = list()
+# plot_degree = vector()
+# country.parse = unique(tfr_na$Country.or.area)
+
+# for(i in 1:length(country.parse)) {
+#    country <- country.parse[i]
+#    plot_list[[i]] <- best_model_na(country, print.plot = FALSE)$plot
+#    plot_degree[i] <- best_model_na(country, print.plot = FALSE)$details$degree # create degree of the polynomial model for each country
+#    if(i %% 10 == 0) {
+#      print(paste("Country:", country))
+#    }
+# }
+
+# ggsave("Compute missing value using knn.pdf", marrangeGrob(grobs = plot_list, nrow = 3, ncol = 2))
+```
+
+Look at a few selected plots. 
+```{r}
+# Good ones
+best_model_na("Angola", print.plot = FALSE)$plot
+best_model_na("Serbia", print.plot = FALSE)$plot
+
+# Bad ones
+best_model_na("Mayotte", print.plot = FALSE)$plot
+best_model_na("Saudi Arabia", print.plot = FALSE)$plot
+```
+
+And look at the 3 most similar countries for these 4 countries
+```{r}
+countr.list = c("Angola", "Serbia", "Mayotte", "Saudi Arabia")
+knn.name.select = knn.name %>% filter(rownames(knn.name) %in% countr.list)
+rownames(knn.name.select) = countr.list
+colnames(knn.name.select) = c("1", "2", "3")
+knn.name.select
+```
+
