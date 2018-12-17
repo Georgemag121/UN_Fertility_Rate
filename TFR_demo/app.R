@@ -1,3 +1,4 @@
+library(plotly)
 library(shiny)
 library(tidyverse)
 #library(DT)

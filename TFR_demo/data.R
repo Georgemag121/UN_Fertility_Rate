@@ -51,11 +51,6 @@ best_model <- function(country, tfr_data, tfr_var = "DataValue", max_degree = 10
     if(imputed) {
       p <- ggplot() + 
         geom_point(data = country_data, aes(x = year, y = DataValue, col = Type), size = 1) + 
-        geom_line(data = country_data %>% filter(Type == "Original"), aes(x = year, y = DataValue, linetype = Series), 
-                  col = "green4", show.legend = FALSE) +
-        geom_line(data = country.pred, aes(x = year, y = fit)) + 
-        geom_line(data = country_data %>% filter(Type == "Original"), aes(x = year, y = DataValue, linetype = Series), 
-                  col = "green4", show.legend = FALSE) +
         geom_line(data = country.pred, aes(x = year, y = fit)) + 
         geom_ribbon(data = country.pred, aes(x = year, ymin = lwr, ymax = upr), alpha = 0.4) + 
         scale_colour_manual(name = "Type", values = c("red", "green4", "#5B92E5"), labels = c("Imputed", "Original", "UN WPP 2017")) +
@@ -66,8 +61,6 @@ best_model <- function(country, tfr_data, tfr_var = "DataValue", max_degree = 10
         geom_point(data = country_data, aes(x = year, y = DataValue, col = Type), size = 1) + 
         geom_line(data = country_data %>% filter(Type == "UN WPP 2017"),
                   aes(x = year, y = DataValue), col = "#5B92E5") +
-        geom_line(data = country_data %>% filter(Type == "Original"), aes(x = year, y = DataValue, linetype = Series), 
-                  col = "green4", show.legend = FALSE) +
         geom_line(data = country.pred, aes(x = year, y = fit)) + 
         geom_ribbon(data = country.pred, aes(x = year, ymin = lwr, ymax = upr), alpha = 0.4) + 
         scale_colour_manual(name = "Type", values = c("green4", "#5B92E5"), labels = c("Original", "UN WPP 2017")) +
@@ -78,8 +71,6 @@ best_model <- function(country, tfr_data, tfr_var = "DataValue", max_degree = 10
     if(imputed) {
       p <- ggplot() + 
         geom_point(data = country_data, aes(x = year, y = DataValue, col = Type), size = 1) + 
-        geom_line(data = country_data %>% filter(Type == "Original"), aes(x = year, y = DataValue, linetype = Series), 
-                  col = "green4", show.legend = FALSE) +
         geom_line(data = country.pred, aes(x = year, y = fit)) + 
         geom_ribbon(data = country.pred, aes(x = year, ymin = lwr, ymax = upr), alpha = 0.4) + 
         scale_colour_manual(name = "Type", values = c("red", "green4"), labels = c("Imputed", "Original")) +
@@ -88,8 +79,6 @@ best_model <- function(country, tfr_data, tfr_var = "DataValue", max_degree = 10
     } else if(!imputed) {
       p <- ggplot() + 
         geom_point(data = country_data, aes(x = year, y = DataValue), size = 1, col = "green4") + 
-        geom_line(data = country_data %>% filter(Type == "Original"), aes(x = year, y = DataValue, linetype = Series), 
-                  col = "green4", show.legend = FALSE) +
         geom_line(data = country.pred, aes(x = year, y = fit)) + 
         geom_ribbon(data = country.pred, aes(x = year, ymin = lwr, ymax = upr), alpha = 0.4) + 
         ggtitle(paste(country)) +

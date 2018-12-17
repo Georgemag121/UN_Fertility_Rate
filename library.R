@@ -199,8 +199,7 @@ best_model <- function(country, tfr_data, tfr_var = "DataValue", max_degree = 10
                   col = "green4", show.legend = FALSE) +
         geom_line(data = country.pred, aes(x = year, y = fit)) + 
         geom_ribbon(data = country.pred, aes(x = year, ymin = lwr, ymax = upr), alpha = 0.2) + 
-        scale_colour_manual(name = "Type", values = c("red", "green4", "#5B92E5"), labels = c("Imputed", "Original", "UN WPP 2017")) +
-        ggtitle(paste(country))
+        scale_colour_manual(name = "Type", values = c("red", "green4", "#5B92E5"), labels = c("Imputed", "Original", "UN WPP 2017"))
     } else if(!imputed) {
       p <- ggplot() + 
         geom_point(data = country_data, aes(x = year, y = DataValue, col = Type), size = 1) + 
@@ -211,7 +210,6 @@ best_model <- function(country, tfr_data, tfr_var = "DataValue", max_degree = 10
         geom_line(data = country.pred, aes(x = year, y = fit)) + 
         geom_ribbon(data = country.pred, aes(x = year, ymin = lwr, ymax = upr), alpha = 0.2) + 
         scale_colour_manual(name = "Type", values = c("green4", "#5B92E5"), labels = c("Original", "UN WPP 2017")) +
-        ggtitle(paste(country)) +
         lims(x = c(1950,2016))
     }
   } else if(!show.wpp) {
@@ -223,7 +221,6 @@ best_model <- function(country, tfr_data, tfr_var = "DataValue", max_degree = 10
         geom_line(data = country.pred, aes(x = year, y = fit)) + 
         geom_ribbon(data = country.pred, aes(x = year, ymin = lwr, ymax = upr), alpha = 0.2) + 
         scale_colour_manual(name = "Type", values = c("red", "green4"), labels = c("Imputed", "Original")) +
-        ggtitle(paste(country)) +
         lims(x = c(1950,2016))
     } else if(!imputed) {
       p <- ggplot() + 
@@ -232,15 +229,18 @@ best_model <- function(country, tfr_data, tfr_var = "DataValue", max_degree = 10
                   col = "green4", show.legend = FALSE) +
         geom_line(data = country.pred, aes(x = year, y = fit)) + 
         geom_ribbon(data = country.pred, aes(x = year, ymin = lwr, ymax = upr), alpha = 0.2) + 
-        ggtitle(paste(country)) +
         lims(x = c(1950,2016))
     }
   }
+  
+  ## Add labels
+  p <- p + labs(title = country, x = "Year", y = "Total fertility rate")
   
   ## Fix y-axis?
   if(fix.y.axis) {
     p <- p + scale_y_continuous(limits = c(0, 11.5))
   }
+
   
   ## Print plot if specified
   if(print.plot) {

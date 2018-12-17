@@ -18,7 +18,9 @@ wpp <- wpp_raw %>%
   mutate(year = substr(month, 1, 4) %>% as.integer,
          Type = "UN WPP 2017") %>% 
   rename(wpp.est = DataValue) %>%
-  left_join(subregion[, c(2,1)], by = c("LocID" = "ISO.code"))
+  left_join(subregion[, c(2,1)], by = c("LocID" = "ISO.code")) %>%
+  filter(!is.na(Country.or.area), year <= 2017, year >= 1950) %>%
+  as.tbl()
 
 tfr_wpp <- left_join(tfr, wpp[, c(1,5,4)], by = c("ISO.code" = "LocID", "year" = "year"))
 wt.recall <- 1
